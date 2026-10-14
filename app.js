@@ -22,6 +22,15 @@ const TEMPLATE=[
  {id:'s7b',order:10,stage:7,sub:'大貨下單（含包裝）',owners:['營管-採購'],start:'2027-06',end:'2027-08',checklist:ci(['大貨下單','包裝下單','生產進度追蹤','到貨驗收'])},
  {id:'s8',order:11,stage:8,sub:'新品上市',owners:['行銷','業務-電商','營管-倉管','業務-國外','業務-顧問'],start:'2027-09',end:'2027-09',checklist:ci(['上架資料與商品照','通路鋪貨','新品上市'])}
 ];
+/* project types: internal runs on the annual stage plan; external / gift projects carry their own dated stages */
+const PTYPES={
+ internal:{l:'內部新品開發',hint:'從市場調查、設計、打樣到量產上市，耗時最長，依年度計畫約 12–16 個月。'},
+ external:{l:'外部設計案',hint:'目標明確的中長期設計案，預設約 4–5 個月。填客戶交期時，各階段會依比例排進交期內。',
+   stages:[['e1','需求訪談與簽約',10],['e2','概念提案',21],['e3','設計發展',28],['e4','打樣與測試',28],['e5','修正定稿',14],['e6','量產與交付',35]]},
+ gift:{l:'企禮客製案',hint:'時程短，視客戶需求而定，預設約 6 週。建議填客戶交期，系統會從交期倒推各階段。',
+   stages:[['g1','需求確認與報價',3],['g2','設計提案',5],['g3','客戶確認',3],['g4','打樣確認',7],['g5','生產製作',21],['g6','包裝出貨',3]]}
+};
+const TYPE_KEYS=['internal','external','gift'];
 const LAUNCH=new Date(2027,8,1);
 const BASE_Y=2026,BASE_M=6,NM=16;
 
@@ -29,7 +38,7 @@ const BASE_Y=2026,BASE_M=6,NM=16;
 const clone=o=>JSON.parse(JSON.stringify(o));
 const S={tasks:clone(TEMPLATE),notes:[],files:[],products:[],people:{},claims:{},settings:null,logs:[],mode:'loading',
   db:null,user:null,assets:null,me:null,isOwner:false,isAdmin:false,canWrite:null,names:{},
-  view:'mine',filter:'',open:null,composeKind:'comment',drafts:{},form:null,editDates:false,setDraft:null};
+  view:'mine',filter:'',gProd:'',open:null,openProd:null,openProj:null,tab:'all',allType:'',showClosed:false,composeKind:'comment',drafts:{},form:null,editDates:false,setDraft:null};
 try{const v=localStorage.getItem('np-view');if(v)S.view=v;}catch(e){}
 
 /* ---------- helpers ---------- */
@@ -93,6 +102,81 @@ function inScope(t,view){
   return t.owners.includes(view)||t.owners.includes('全公司');
 }
 const leadTxt=t=>t.lead?pname(t.lead):'未指定';
+/* ---------- projects of every type, normalised for the overview ---------- */
+const pType=p=>PTYPES[p.type]?p.type:'internal';
+const isInternal=p=>pType(p)==='internal';
+const internalProds=()=>S.products.filter(isInternal);
+const typedProjs=ty=>S.products.filter(p=>pType(p)===ty);
+const typeBadge=ty=>`<span class="tb tb-${ty}">${esc(PTYPES[ty].l)}</span>`;
+function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
+// spread a type's template stages from start; with a due date, scale them to end exactly on it
+function genStages(ty,start,due){
+  const tpl=PTYPES[ty].stages,total=tpl.reduce((a,x)=>a+x[2],0);
+  const avail=due?days(start,due)+1:total;let prev=0,cum=0;
+  return tpl.map(([k,n,d],i)=>{cum+=d;let b=Math.round(cum/total*avail);b=Math.max(b,prev+1);b=Math.min(b,avail-(tpl.length-1-i));
+    const st={k,n,start:iso(addDays(start,prev)),end:iso(addDays(start,b-1)),v:''};prev=b;return st;});
+}
+const tplDays=ty=>PTYPES[ty].stages.reduce((a,x)=>a+x[2],0);
+const planCell=t=>{const k=status(t).k;return k==='lock'?'done':k==='blocked'?'issue':['active','over','done','review'].includes(k)?'active':'';};
+function normProj(p){
+  let st;
+  if(p.kind==='plan')st=sorted().map(t=>({k:t.id,n:t.sub,s:tStart(t),e:tEnd(t),v:planCell(t)}));
+  else if(isInternal(p)){const c=p.cells||{};st=prodCols().map(t=>({k:t.id,n:t.sub,s:pStart(p,t),e:pEnd(p,t),v:c[t.id]||''}));}
+  else st=(p.stages||[]).map(x=>({k:x.k,n:x.n,s:pd(x.start),e:pd(x.end),v:x.v||''}));
+  const td=today();st.forEach(x=>x.late=!p.dropped&&x.v!=='done'&&td>x.e);
+  const done=st.filter(x=>x.v==='done').length;
+  const start=st.length?new Date(Math.min(...st.map(x=>x.s))):td,end=st.length?new Date(Math.max(...st.map(x=>x.e))):td;
+  const cur=st.find(x=>x.v!=='done')||null;
+  const lateD=Math.max(0,...st.filter(x=>x.late).map(x=>days(x.e,td)));
+  let state;
+  if(p.dropped)state={k:'todo',l:'已停止'};
+  else if(st.length&&done===st.length)state={k:'done',l:'已完成'};
+  else if(st.some(x=>x.v==='issue'))state={k:'blocked',l:'有問題'};
+  else if(lateD>0)state={k:'over',l:'逾期 '+lateD+' 天'};
+  else if(td<start)state={k:'todo',l:'未開始'};
+  else state={k:'active',l:'進行中'};
+  return {p,type:p.kind==='plan'?'internal':pType(p),name:p.name,stages:st,start,end,done,total:st.length,cur,state,
+    closed:!!p.dropped||(st.length>0&&done===st.length),due:p.due?pd(p.due):end};
+}
+function allProjects(){
+  const list=S.products.map(normProj);
+  if(S.tasks.length)list.unshift(normProj({id:'plan',kind:'plan',name:'年度新品開發計畫（全體階段）'}));
+  return list;
+}
+const openAttr=P=>P.p.kind==='plan'?'data-tab="internal"':isInternal(P.p)?`data-prod="${esc(P.p.id)}"`:`data-proj="${esc(P.p.id)}"`;
+const pcolOrder=P=>(P.state.k==='over'||P.state.k==='blocked'?0:1);
+const sortProj=list=>list.slice().sort((a,b)=>(a.closed-b.closed)||(pcolOrder(a)-pcolOrder(b))||(a.due-b.due));
+
+/* ---------- date timeline shared by the overview and type tabs ---------- */
+function dateGantt(list,labelHead){
+  if(!list.length)return '<div class="empty" style="margin:12px">沒有符合的專案。</div>';
+  const td=today();
+  let lo=new Date(Math.min(td,...list.map(P=>P.start))),hi=new Date(Math.max(td,...list.map(P=>P.end)));
+  const weekly=days(lo,hi)<=120;const cols=[];
+  if(weekly){lo=addDays(lo,-((lo.getDay()+6)%7));hi=addDays(hi,7-((hi.getDay()+6)%7));for(let d=new Date(lo);d<hi;d=addDays(d,7))cols.push({d,l:(cols.length===0||d.getDate()<=7&&d.getMonth()===0?`<b>${d.getFullYear()}</b>`:'')+md(d)});}
+  else{lo=new Date(lo.getFullYear(),lo.getMonth(),1);hi=new Date(hi.getFullYear(),hi.getMonth()+1,1);for(let d=new Date(lo);d<hi;d=new Date(d.getFullYear(),d.getMonth()+1,1))cols.push({d,l:(cols.length===0||d.getMonth()===0?`<b>${d.getFullYear()}</b>`:'')+(d.getMonth()+1)+'月'});}
+  const span=days(lo,hi);const pct=d=>days(lo,d)/span*100;
+  const tw=cols.length*(weekly?60:64);
+  const lines=cols.map(c=>`<i style="left:${pct(c.d)}%"></i>`).join('')+(td>=lo&&td<hi?`<i class="today" style="left:${pct(td)}%" title="今天 ${md(td)}"></i>`:'');
+  let h=`<div class="dgw" style="--label:260px;--tw:${tw}px"><div class="dg" style="--tw:${tw}px"><div class="dg-hl">${esc(labelHead)}</div><div class="dg-hd">${cols.map((c,i)=>`<span style="left:${pct(c.d)}%;width:${(i+1<cols.length?pct(cols[i+1].d):100)-pct(c.d)}%">${c.l}</span>`).join('')}</div>`;
+  list.forEach(P=>{
+    const oa=openAttr(P);
+    h+=`<div class="dg-lab"><div class="row" style="gap:6px;flex-wrap:nowrap;min-width:0">${typeBadge(P.type)}<button class="linkbtn" ${oa} style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(P.name)}</button></div><div class="sub">${P.p.client?esc(P.p.client)+' · ':''}${P.cur&&!P.p.dropped?'目前：'+esc(P.cur.n):esc(P.state.l)} · ${md(P.end)} 完成</div></div><div class="dg-tr">`+
+      P.stages.map(x=>{const a=pct(x.s),b=pct(addDays(x.e,1));const cls=x.late?'s-late':x.v?'s-'+x.v:'';
+        return `<button class="dg-seg ${cls}" ${oa} style="left:${a}%;width:calc(${b-a}% - 1px)" title="${esc(P.name)}｜${esc(x.n)}｜${ymd(x.s)}–${ymd(x.e)}｜${x.late?'逾期':CELL_L[x.v]}">${esc(x.n)}</button>`;}).join('')+'</div>';
+  });
+  return h+`</div><div class="dg-lines" style="--label:260px">${lines}</div></div>`;
+}
+const dgLegend=()=>[['','未開始'],['s-active','進行中'],['s-done','完成'],['s-issue','有問題'],['s-late','逾期']].map(([c,l])=>`<span class="lg-seg"><i class="dg-seg ${c}"></i>${l}</span>`).join('')+'<span class="lg-seg"><i style="width:2px;background:var(--danger)"></i>今天</span>';
+
+/* per-product schedule: p.sched[taskId]={start,end} overrides the annual stage dates */
+const prodCols=()=>sorted().filter(t=>t.stage>=3);
+function pSched(p,t){const s=p.sched&&p.sched[t.id];return s&&s.start&&s.end?{start:s.start,end:s.end,custom:true}:{start:t.start,end:t.end,custom:false};}
+const pStart=(p,t)=>som(pSched(p,t).start);
+const pEnd=(p,t)=>{const s=pSched(p,t);return s.custom?eom(s.end):tEnd(t);};
+const pLate=(p,t)=>!p.dropped&&(p.cells||{})[t.id]!=='done'&&today()>pEnd(p,t);
+function mRange(a,b){const A=ym(a),B=ym(b);if(a===b)return A.y+'/'+A.m;return A.y===B.y?`${A.y}/${A.m}–${B.m}`:`${A.y}/${A.m}–${B.y}/${B.m}`;}
+function addMonths(s,n){const {y,m}=ym(s);const d=new Date(y,m-1+n,1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
 
 /* ---------- reminder engine (same rules the daily email uses) ---------- */
 function reminders(){
@@ -202,6 +286,9 @@ function renderGantt(){
   const sel=$('#fDept');if(sel.options.length===1)LABELS.forEach(d=>sel.add(new Option(d,d)));
   sel.value=S.filter;
   $('#legend').innerHTML=[['lock','已定案'],['active','進行中'],['over','逾期'],['blocked','卡住']].map(([k,l])=>`<span class="pill p-${k}">${k==='lock'?lockSvg():''}${l}</span>`).join('')+'<span class="lg-base"><i></i>原訂時程</span>';
+  const ps=internalProds().sort((a,b)=>(a.order||0)-(b.order||0));
+  const ps_=$('#fProd');ps_.innerHTML='<option value="">年度階段</option>'+ps.map(p=>`<option value="${esc(p.id)}">${esc(p.name)}${p.dropped?'（停止開發）':''}</option>`).join('');
+  const gp=ps.find(p=>p.id===S.gProd)||null;if(!gp)S.gProd='';ps_.value=S.gProd;
   const td=today();
   const curIdx=(td.getFullYear()-BASE_Y)*12+(td.getMonth()+1-BASE_M);
   const dim=new Date(td.getFullYear(),td.getMonth()+1,0).getDate();
@@ -211,8 +298,30 @@ function renderGantt(){
   let h=`<div class="g-h left" style="grid-column:1/3"></div><div class="g-h years"><div>2026</div><div>2027</div></div>
    <div class="g-cellh" style="position:sticky;left:0;z-index:3;border-right:1px solid var(--line)">項目 / 次項目 / 主責</div><div class="g-cellh">負責單位</div>
    <div class="months">${Array.from({length:NM},(_,i)=>`<div class="${i===curIdx?'now':''}">${((BASE_M-1+i)%12)+1}月</div>`).join('')}</div>`;
-  const ts=sorted().filter(t=>!S.filter||t.owners.includes(S.filter)||t.owners.includes('全公司'));
+  const ts=(gp?prodCols():sorted()).filter(t=>!S.filter||t.owners.includes(S.filter)||t.owners.includes('全公司'));
+  const todayHtml=ri=>showToday?`<div class="today" style="left:${todayPct}%"></div>${ri===0?`<div class="today-tag" style="left:${todayPct}%">今天 ${md(td)}</div>`:''}`:'';
   let prev=0;
+  if(gp){
+    const cells=gp.cells||{};
+    ts.forEach((t,ri)=>{
+      const sc=pSched(gp,t),v=cells[t.id]||'',late=pLate(gp,t);
+      const a=clampI(mIdx(sc.start)),b=clampI(mIdx(sc.end)+1);
+      const first=t.stage!==prev;prev=t.stage;
+      let base='';
+      if(sc.custom&&(sc.start!==t.start||sc.end!==t.end)){const ba=clampI(mIdx(t.start)),bb=clampI(mIdx(t.end)+1);base=`<div class="g-base" style="left:calc(${ba/NM*100}% + 1px);width:calc(${(bb-ba)/NM*100}% - 2px)"></div>`;}
+      const lbl=late?'逾期 '+days(pEnd(gp,t),td)+' 天':CELL_L[v];
+      h+=`<div class="g-lab">${first?`<div class="stg"><b>${t.stage}</b>${esc(STAGES[t.stage])}</div>`:''}<div class="s">${esc(t.sub)}</div><div class="s">${esc(mRange(sc.start,sc.end))}${sc.custom?' · <em>自訂</em>':' · 同年度時程'}</div></div>
+       <div class="g-own">${esc(ownersTxt(t))}</div>
+       <div class="g-track ${ri===0?'first':''}">
+         ${base}${todayHtml(ri)}
+         <button class="g-bar ${v==='issue'?'blocked':late?'over':''}" style="--stage:${stageColor(t.stage)};left:calc(${a/NM*100}% + 3px);width:calc(${(b-a)/NM*100}% - 6px)" data-prod="${gp.id}" aria-label="${esc(gp.name)} ${esc(t.sub)}，${esc(lbl)}">
+           <i style="width:${v==='done'?100:v==='active'?50:0}%"></i><span>${esc(lbl)}</span>
+         </button>
+       </div>`;
+    });
+    if(!ts.length)h+=`<div class="g-lab" style="grid-column:1/-1;position:static"><div class="s">沒有符合篩選的任務。</div></div>`;
+    $('#ganttGrid').innerHTML=h;return;
+  }
   ts.forEach((t,ri)=>{
     const st=status(t),p=prog(t);
     const a=clampI(mIdx(t.start)),b=clampI(mIdx(t.end)+1);
@@ -224,7 +333,7 @@ function renderGantt(){
      <div class="g-own">${esc(ownersTxt(t))}</div>
      <div class="g-track ${ri===0?'first':''}">
        ${base}
-       ${showToday?`<div class="today" style="left:${todayPct}%"></div>${ri===0?`<div class="today-tag" style="left:${todayPct}%">今天 ${md(td)}</div>`:''}`:''}
+       ${todayHtml(ri)}
        <button class="g-bar ${st.k==='blocked'?'blocked':st.over?'over':''} ${t.locked?'lock':''}" style="--stage:${stageColor(t.stage)};left:calc(${a/NM*100}% + 3px);width:calc(${(b-a)/NM*100}% - 6px)" data-open="${t.id}" aria-label="${esc(t.sub)}，${esc(st.l)}，完成 ${p}%">
          <i style="width:${p}%"></i><span>${t.locked?lockSvg():''}${p}%</span>
        </button>
@@ -236,22 +345,94 @@ function renderGantt(){
 
 /* ---------- render: products ---------- */
 function renderProducts(){
-  const cols=sorted().filter(t=>t.stage>=3);
-  const ps=S.products.slice().sort((a,b)=>(a.order||0)-(b.order||0));
+  const cols=prodCols();
+  const ps=internalProds().sort((a,b)=>(a.order||0)-(b.order||0));
   const activeN=ps.filter(p=>!p.dropped).length,dropN=ps.length-activeN;
-  $('#prodSummary').innerHTML=ps.length?`<div class="stat" style="min-width:200px"><div class="k">今年新品</div><div class="v num">${activeN}<small>款開發中</small></div><div class="s">${dropN?dropN+' 款停止開發':'沒有停止開發的品項'}</div></div>`:'';
+  const lateN=ps.filter(p=>cols.some(t=>pLate(p,t))).length;
+  $('#prodSummary').innerHTML=ps.length?`<div class="stat" style="min-width:200px"><div class="k">今年新品</div><div class="v num">${activeN}<small>款開發中</small></div><div class="s">${dropN?dropN+' 款停止開發':'沒有停止開發的品項'}${lateN?` · <span style="color:var(--danger)">${lateN} 款有階段逾期</span>`:''}</div></div>`:'';
   const mg=isMgr()&&canAct(),ed=canAct();
   let h='';
   if(!ps.length){h=`<div class="empty">還沒有新品名單。第 2 階段「新品定案名單」完成後，${mg?'在下方輸入品名逐款加入。':'請產品PM 把定案的品項加進來。'}</div>`;}
   else{
     h=`<div class="pscroll"><table class="pm"><thead><tr><th scope="col">品項</th>${cols.map(t=>`<th scope="col">${esc(t.sub.replace(/（.*?）/g,''))}</th>`).join('')}</tr></thead><tbody>`+
     ps.map(p=>{const cells=p.cells||{};const done=cols.filter(t=>cells[t.id]==='done').length;
-      return `<tr class="${p.dropped?'dropped':''}"><td><b>${esc(p.name)}</b><div class="sub">${p.dropped?'停止開發':`完成 ${done}/${cols.length}`}${mg?` · <button class="linkbtn sub" style="font-weight:500" data-drop="${p.id}">${p.dropped?'恢復開發':'停止開發'}</button>`:''}</div></td>`+
-      cols.map(t=>{const v=cells[t.id]||'';return `<td><button class="cell ${v}" data-cell="${p.id}" data-t="${t.id}" ${ed&&!p.dropped?'':'disabled'} aria-label="${esc(p.name)} ${esc(t.sub)}：${CELL_L[v]}">${CELL_L[v]}</button></td>`;}).join('')+'</tr>';}).join('')+
+      return `<tr class="${p.dropped?'dropped':''}"><td><button class="linkbtn" data-prod="${p.id}" aria-label="${esc(p.name)} 時程">${esc(p.name)}</button><div class="sub">${p.dropped?'停止開發':`完成 ${done}/${cols.length}`}${mg?` · <button class="linkbtn sub" style="font-weight:500" data-drop="${p.id}">${p.dropped?'恢復開發':'停止開發'}</button>`:''}</div></td>`+
+      cols.map(t=>{const v=cells[t.id]||'';const sc=pSched(p,t),late=pLate(p,t);return `<td><button class="cell ${v}" data-cell="${p.id}" data-t="${t.id}" ${ed&&!p.dropped?'':'disabled'} aria-label="${esc(p.name)} ${esc(t.sub)}：${CELL_L[v]}">${CELL_L[v]}</button><div class="cd${sc.custom?' custom':''}${late?' late':''}">${esc(mRange(sc.start,sc.end))}${late?' · 逾期':''}</div></td>`;}).join('')+'</tr>';}).join('')+
     '</tbody></table></div>';
   }
   if(mg)h+=`<div class="addrow"><label for="newProd" class="vh">新品名稱</label><input type="text" id="newProd" placeholder="新品名稱，例如：六角黃銅鋼筆 新色"><button class="btn primary sm" data-act="addProd">加入新品</button></div>`;
   $('#prodWrap').innerHTML=h;
+}
+
+/* ---------- render: all-projects tab ---------- */
+function projRow(P){
+  const pc=P.total?Math.round(P.done/P.total*100):0;
+  return `<tr class="${P.p.dropped?'dropped':''}"><td><button class="linkbtn" ${openAttr(P)}>${esc(P.name)}</button>${P.p.client?`<div class="sub">${esc(P.p.client)}</div>`:''}</td>
+    <td>${typeBadge(P.type)}</td><td>${esc(P.p.lead?pname(P.p.lead):P.p.kind==='plan'?'各階段主責':'未指定')}</td>
+    <td>${P.cur&&!P.p.dropped?esc(P.cur.n)+`<div class="sub">${md(P.cur.s)}–${md(P.cur.e)}</div>`:'—'}</td>
+    <td><div class="row" style="flex-wrap:nowrap"><div class="bar"><i style="width:${pc}%"></i></div><span class="num sub">${P.done}/${P.total}</span></div></td>
+    <td class="num">${ymd(P.start)} – ${ymd(P.end)}</td><td>${pill(P.state)}</td></tr>`;
+}
+const projTable=list=>list.length?`<table class="pl"><thead><tr><th scope="col">專案</th><th scope="col">類型</th><th scope="col">主責</th><th scope="col">目前階段</th><th scope="col">進度</th><th scope="col">期間</th><th scope="col">狀態</th></tr></thead><tbody>${list.map(projRow).join('')}</tbody></table>`:'<div class="empty" style="margin:12px">沒有符合的專案。</div>';
+function fillLead(sel){if(!sel)return;const mem=memberList();const want=mem.map(m=>m.id).join(',');if(sel.dataset.ids===want)return;const v=sel.value;sel.dataset.ids=want;sel.innerHTML='<option value="">未指定</option>'+mem.map(m=>`<option value="${m.id}">${esc(m.name)}（${esc(m.dept)}）</option>`).join('');sel.value=v;}
+function syncForm(f,ty){
+  const box=$('#'+f+'Form');if(!box)return;box.hidden=!(isMgr()&&canAct());
+  fillLead($('#'+f+'Lead'));const st=$('#'+f+'Start');if(st&&!st.value)st.value=iso(today());
+  box.querySelectorAll('[data-ext]').forEach(el=>el.hidden=ty==='internal');
+  const hint=$('#'+f+'Hint');
+  if(ty==='internal')hint.textContent='內部新品會加入「內部新品開發」分頁，沿用年度階段時程，之後可在產品表個別調整。';
+  else{const s0=st.value?pd(st.value):today(),du=$('#'+f+'Due').value;const end=du?pd(du):addDays(s0,tplDays(ty)-1);
+    hint.textContent=`${PTYPES[ty].l}：${PTYPES[ty].stages.map(x=>x[1]).join(' → ')}。${du?'依交期排程':'未填交期，依範本約 '+Math.round(tplDays(ty)/7)+' 週'}，預計 ${ymd(end)} 完成。`;}
+}
+function renderAll(){
+  const list=allProjects();const open=list.filter(P=>!P.closed);
+  $('#allStats').innerHTML=TYPE_KEYS.map(ty=>{const l=open.filter(P=>P.type===ty);const o=l.filter(P=>P.state.k==='over'||P.state.k==='blocked').length;
+    const nx=l.filter(P=>P.due>=today()).sort((a,b)=>a.due-b.due)[0];
+    return `<button class="stat" data-tab="${ty}"><div class="k">${typeBadge(ty)}</div><div class="v num">${ty==='internal'?l.filter(P=>P.p.kind!=='plan').length:l.length}<small>${ty==='internal'?'款開發中':'案進行中'}</small></div><div class="s">${o?`<span style="color:var(--danger)">${o} 項落後或有問題</span>`:'沒有落後'}${nx?` · 最近交期 ${md(nx.due)}`:''}</div></button>`;}).join('')+
+    `<div class="stat hot"><div class="k">全公司</div><div class="v num">${open.filter(P=>P.p.kind!=='plan').length}<small>個專案進行中</small></div><div class="s">${open.filter(P=>P.state.k==='over').length} 項逾期</div></div>`;
+  $('#allFilter').innerHTML='<span>類型</span>'+[['','全部']].concat(TYPE_KEYS.map(k=>[k,PTYPES[k].l])).map(([k,l])=>`<button class="chip" aria-pressed="${S.allType===k}" data-tfilter="${k}">${l}</button>`).join('');
+  $('#allClosed').checked=S.showClosed;$('#allLegend').innerHTML=dgLegend();
+  const shown=sortProj(list.filter(P=>(!S.allType||P.type===S.allType)&&(S.showClosed||!P.closed)));
+  $('#allGantt').innerHTML=dateGantt(shown,'專案');
+  $('#allList').innerHTML=projTable(shown);
+  $('#allBanner').innerHTML=list.length?'':'<div class="banner">還沒有任何專案。用下方表單新增第一個專案。</div>';
+  syncForm('af',$('#afType').value);
+}
+function renderType(ty){
+  const T=PTYPES[ty];
+  $('#tyEyebrow').textContent=T.l;$('#tyTitle').textContent=ty==='external'?'外部設計案時程':'企禮客製案時程';
+  $('#tyDesc').textContent=T.hint+' 點專案名稱可調整各階段日期、切換狀態與留言。';
+  const list=typedProjs(ty).map(normProj);const open=list.filter(P=>!P.closed);
+  const over=open.filter(P=>P.state.k==='over').length;
+  $('#tySummary').innerHTML=`<div class="stat" style="min-width:200px"><div class="k">進行中</div><div class="v num">${open.length}<small>案</small></div><div class="s">${over?`<span style="color:var(--danger)">${over} 案逾期</span>`:'沒有逾期'}</div></div>`;
+  $('#tyClosed').checked=S.showClosed;$('#tyLegend').innerHTML=dgLegend();
+  const shown=sortProj(list.filter(P=>S.showClosed||!P.closed));
+  $('#tyBanner').innerHTML=list.length?'':`<div class="banner">還沒有${T.l}。${isMgr()&&canAct()?'用下方表單建立，時程會依範本自動排好。':'請產品PM 或老闆建立專案。'}</div>`;
+  $('#tyGantt').innerHTML=dateGantt(shown,'專案 / 客戶');
+  // stage matrix: columns follow the type template
+  const ed=canAct();
+  $('#tyList').innerHTML=shown.length?`<table class="pm"><thead><tr><th scope="col">專案</th>${T.stages.map(x=>`<th scope="col">${esc(x[1])}</th>`).join('')}<th scope="col">狀態</th></tr></thead><tbody>`+shown.map(P=>{const p=P.p;
+    return `<tr class="${p.dropped?'dropped':''}"><td><button class="linkbtn" data-proj="${esc(p.id)}">${esc(p.name)}</button><div class="sub">${esc(p.client||'')}${p.client?' · ':''}主責 ${esc(p.lead?pname(p.lead):'未指定')}${p.due?' · 交期 '+md(pd(p.due)):''}</div></td>`+
+      T.stages.map(([k])=>{const x=P.stages.find(y=>y.k===k);if(!x)return '<td>—</td>';
+        return `<td><button class="cell ${x.v}" data-pcell="${esc(p.id)}" data-k="${k}" ${ed&&!p.dropped?'':'disabled'} aria-label="${esc(p.name)} ${esc(x.n)}：${CELL_L[x.v]}">${CELL_L[x.v]}</button><div class="cd${x.late?' late':''}">${md(x.s)}–${md(x.e)}${x.late?' · 逾期':''}</div></td>`;}).join('')+
+      `<td>${pill(P.state)}</td></tr>`;}).join('')+'</tbody></table>':'';
+  $('#tyList').hidden=!shown.length;
+  syncForm('tf',ty);
+}
+function renderTabs(){
+  const n=ty=>S.products.filter(p=>pType(p)===ty&&!normProj(p).closed).length;
+  document.querySelectorAll('.tab').forEach(b=>{const k=b.dataset.tab;b.setAttribute('aria-selected',String(k===S.tab));b.tabIndex=k===S.tab?0:-1;
+    const c=k==='all'?'':n(k);b.innerHTML=esc(k==='all'?'全部專案':PTYPES[k].l)+(c?`<span class="num">${c}</span>`:'');});
+  $('#pane-all').hidden=S.tab!=='all';$('#pane-internal').hidden=S.tab!=='internal';
+  const tyOn=S.tab==='external'||S.tab==='gift';$('#pane-type').hidden=!tyOn;if(tyOn)$('#pane-type').setAttribute('aria-labelledby','tab-'+S.tab);
+  $('#secNav').hidden=S.tab!=='internal';
+  if(S.tab==='all')renderAll();else if(tyOn)renderType(S.tab);
+}
+function setTab(t,scroll){
+  if(!['all','internal','external','gift'].includes(t))t='all';
+  S.tab=t;try{localStorage.setItem('np-tab',t);}catch(e){}
+  const h='#'+(t==='internal'?'overview':t);if(location.hash!==h)history.replaceState(null,'',h);
+  renderTabs();if(scroll)scrollTo({top:0});onScroll();
 }
 
 /* ---------- render: dashboard ---------- */
@@ -307,7 +488,73 @@ function renderRemind(){
 }
 
 /* ---------- render: drawer ---------- */
+function renderProdDrawer(){
+  const p=S.products.find(x=>x.id===S.openProd);const dw=$('#dw');
+  if(!p){dw.innerHTML='';return;}
+  const cols=prodCols(),cells=p.cells||{},mg=isMgr()&&canAct()&&!p.dropped;
+  const nCustom=cols.filter(t=>pSched(p,t).custom).length;
+  const rows=cols.map(t=>{const sc=pSched(p,t),v=cells[t.id]||'',late=pLate(p,t);
+    return `<tr><th scope="row"><div>${esc(t.sub)}</div><div class="sub">${t.stage}. ${esc(STAGES[t.stage])} · 年度 ${esc(mRange(t.start,t.end))}</div></th>
+      <td><span class="cell ${v}" style="display:inline-block;width:auto">${CELL_L[v]}</span>${late?' <span class="pill p-over">逾期</span>':''}</td>
+      ${mg?`<td><input type="month" id="ps-${t.id}" data-ps="${t.id}" value="${sc.start}" aria-label="${esc(t.sub)} 開始月份"></td><td><input type="month" id="pe-${t.id}" data-pe="${t.id}" value="${sc.end}" aria-label="${esc(t.sub)} 結束月份"></td>`
+      :`<td class="num">${esc(mRange(sc.start,sc.end))}${sc.custom?' <span class="sub">自訂</span>':''}</td>`}</tr>`;}).join('');
+  dw.innerHTML=`
+   <div class="dw-head">
+     <button class="x" data-act="close" aria-label="關閉">×</button>
+     <div class="eyebrow">產品時程</div>
+     <h3 id="dwTitle">${esc(p.name)}</h3>
+     <div class="row"><span class="sub">${nCustom?`${nCustom} 個階段使用自訂時程，其餘沿用年度時程。`:'全部階段沿用年度時程。'}</span></div>
+   </div>
+   <div class="dw-body">
+     <table class="ptab"><thead><tr><th scope="col">階段</th><th scope="col">狀態</th>${mg?'<th scope="col">開始</th><th scope="col">結束</th>':'<th scope="col">時程</th>'}</tr></thead><tbody>${rows}</tbody></table>
+     ${mg?`<div class="box plain"><b>整批調整</b><div class="row"><label class="inline" for="pShift">未完成的階段全部移動</label><input type="number" id="pShift" value="1" min="-12" max="12" style="width:64px"><span>個月</span><button class="btn sm" data-act="shiftProd">套用到上方</button><button class="btn sm" data-act="resetProd">全部改回年度時程</button></div><div class="sub">調整後按「儲存時程」才會生效。和年度時程相同的階段不會另外儲存，之後年度時程改動時會一起跟著動。</div></div>
+     <div class="row"><button class="btn primary" data-act="saveProd">儲存時程</button><button class="btn" data-act="close">取消</button></div>`
+     :p.dropped?'<div class="sub">此品項已停止開發。</div>':'<div class="sub">由產品PM 或老闆調整各品項時程。</div>'}
+     ${p.schedAt?`<div class="sub">最後調整：${esc(nm(p.schedBy))} · ${stamp(p.schedAt)}</div>`:''}
+   </div>`;
+}
+function renderProjDrawer(){
+  const p=S.products.find(x=>x.id===S.openProj);const dw=$('#dw');
+  if(!p){dw.innerHTML='';return;}
+  const P=normProj(p),a=canAct(),mg=isMgr()&&a&&!p.dropped,mem=memberList();
+  const notes=S.notes.filter(n=>n.taskId===p.id).sort((x,y)=>x.at-y.at);
+  const rows=(p.stages||[]).map((x,i)=>{const N=P.stages[i];
+    return `<tr><th scope="row">${esc(x.n)}</th>
+      <td><button class="cell ${x.v||''}" data-pcell="${esc(p.id)}" data-k="${x.k}" ${a&&!p.dropped?'':'disabled'} style="width:auto">${CELL_L[x.v||'']}</button>${N.late?' <span class="pill p-over">逾期</span>':''}</td>
+      ${mg?`<td><input type="date" id="js-${x.k}" value="${x.start}" aria-label="${esc(x.n)} 開始"></td><td><input type="date" id="je-${x.k}" value="${x.end}" aria-label="${esc(x.n)} 結束"></td>`
+      :`<td class="num">${ymd(N.s)} – ${ymd(N.e)}</td>`}</tr>`;}).join('');
+  dw.innerHTML=`
+   <div class="dw-head">
+     <button class="x" data-act="close" aria-label="關閉">×</button>
+     <div class="eyebrow">${esc(PTYPES[pType(p)].l)}</div>
+     <h3 id="dwTitle">${esc(p.name)}</h3>
+     <div class="row">${pill(P.state)}<span class="sub num">${P.done}/${P.total} 階段完成</span></div>
+     <div class="bar"><i style="width:${P.total?Math.round(P.done/P.total*100):0}%"></i></div>
+   </div>
+   <div class="dw-body">
+     <dl class="kv">
+       <dt>客戶</dt><dd>${mg?`<input type="text" id="jClient" value="${esc(p.client||'')}" aria-label="客戶">`:esc(p.client||'—')}</dd>
+       <dt>主責人</dt><dd>${mg?`<select id="jLead" data-plead="${esc(p.id)}" aria-label="主責人"><option value="">未指定</option>${mem.map(m=>`<option value="${m.id}" ${m.id===p.lead?'selected':''}>${esc(m.name)}（${esc(m.dept)}）</option>`).join('')}</select>`:esc(p.lead?pname(p.lead):'未指定')}</dd>
+       <dt>客戶交期</dt><dd>${mg?`<input type="date" id="jDue" value="${p.due||''}" aria-label="客戶交期">`:p.due?ymd(pd(p.due)):'未設定'}</dd>
+       <dt>目前時程</dt><dd class="num">${ymd(P.start)} – ${ymd(P.end)}${p.due&&P.end>pd(p.due)?' <span class="pill p-over">超過交期 '+days(pd(p.due),P.end)+' 天</span>':''}</dd>
+     </dl>
+     <div class="blk"><h4>階段時程</h4>
+       <table class="ptab"><thead><tr><th scope="col">階段</th><th scope="col">狀態（點擊切換）</th>${mg?'<th scope="col">開始</th><th scope="col">結束</th>':'<th scope="col">時程</th>'}</tr></thead><tbody>${rows}</tbody></table></div>
+     ${mg?`<div class="box plain"><b>整批調整</b>
+       <div class="row"><label class="inline" for="jShift">未完成的階段全部移動</label><input type="number" id="jShift" value="7" min="-180" max="180" style="width:72px"><span>天</span><button class="btn sm" data-act="shiftProj">套用到上方</button></div>
+       <div class="row"><button class="btn sm" data-act="refitProj">依交期重新排程</button><span class="sub">從開始日到客戶交期，依範本比例重排所有階段。</span></div>
+       <label for="jReason" class="vh">調整原因</label><input type="text" id="jReason" placeholder="調整原因（選填，會留存紀錄）">
+       <div class="row"><button class="btn primary" data-act="saveProj">儲存</button></div></div>`:''}
+     ${isMgr()&&a?`<div class="row"><button class="btn sm" data-act="dropProj">${p.dropped?'恢復此專案':'停止此專案'}</button></div>`:''}
+     <div class="blk"><h4>討論與紀錄</h4>
+       <div class="notes">${notes.map(noteHtml).join('')||'<div class="empty">還沒有留言。</div>'}</div>
+       ${a?`<div class="compose" style="margin-top:12px"><label for="noteIn" class="vh">內容</label><textarea id="noteIn" rows="3" placeholder="留言給同事，例如客戶回覆、規格變更…">${esc(S.drafts[p.id]||'')}</textarea><button class="btn primary sm" data-act="postProj" style="justify-self:end">送出留言</button></div>`:''}
+     </div>
+   </div>`;
+}
 function renderDrawer(){
+  if(S.openProj){renderProjDrawer();return;}
+  if(S.openProd){renderProdDrawer();return;}
   const t=S.tasks.find(x=>x.id===S.open);const dw=$('#dw');
   if(!t){dw.innerHTML='';return;}
   const st=status(t),p=prog(t),td=today(),set=settings();
@@ -375,7 +622,7 @@ function renderDrawer(){
 }
 function noteHtml(n){return `<div class="note ${n.kind}"><div class="who"><b>${n.kind==='system'?'系統':esc(nm(n.by))}</b><span>${stamp(n.at)}</span>${n.kind==='decision'?'<span class="pill p-review">決策</span>':''}</div><p>${esc(n.text)}</p></div>`;}
 
-function render(){renderHero();renderBench();renderGantt();renderProducts();renderDash();renderRemind();if(S.open)renderDrawer();}
+function render(){renderHero();renderBench();renderGantt();renderProducts();renderDash();renderRemind();renderTabs();if(S.open||S.openProd||S.openProj)renderDrawer();}
 
 /* ---------- writes ---------- */
 const queues={};
@@ -397,6 +644,11 @@ document.addEventListener('change',e=>{
   const el=e.target;
   if(el.matches('input[type=checkbox][data-task]'))toggle(el.dataset.task,+el.dataset.i,el.checked);
   else if(el.id==='fDept'){S.filter=el.value;renderGantt();}
+  else if(el.id==='fProd'){S.gProd=el.value;renderGantt();}
+  else if(el.id==='allClosed'||el.id==='tyClosed'){S.showClosed=el.checked;renderTabs();}
+  else if(['afType','afStart','afDue'].includes(el.id))syncForm('af',$('#afType').value);
+  else if(['tfStart','tfDue'].includes(el.id))syncForm('tf',S.tab);
+  else if(el.dataset.plead){const p=S.products.find(x=>x.id===el.dataset.plead);const v=el.value||null;updProj(p,{lead:v});addNote(p.id,'system',v?`主責人設為 ${pname(v)}`:'取消主責人');}
   else if(el.id==='fileIn'&&el.files[0])upload(el.files[0]);
   else if(el.dataset.lead!==undefined){const t=S.tasks.find(x=>x.id===el.dataset.lead);const v=el.value||null;patchTask(t,{lead:v});addNote(t.id,'system',v?`主責人設為 ${pname(v)}`:'取消主責人');}
   else if(el.dataset.dueTask){const t=S.tasks.find(x=>x.id===el.dataset.dueTask);const cl=clone(t.checklist);const i=+el.dataset.i;cl[i].due=el.value||null;if(!el.value)delete cl[i].due;patchTask(t,{checklist:cl});}
@@ -411,12 +663,17 @@ document.addEventListener('change',e=>{
   }
 });
 document.addEventListener('input',e=>{
-  if(e.target.id==='noteIn'&&S.open)S.drafts[S.open]=e.target.value;
+  if(e.target.id==='noteIn'&&(S.open||S.openProj))S.drafts[S.open||S.openProj]=e.target.value;
 });
 function updPerson(id,patch){S.people[id]={...S.people[id],...patch};render();queue('pp:'+id,()=>S.db.doc('people/'+id).update(patch));}
 document.addEventListener('click',e=>{
-  const b=e.target.closest('[data-open],[data-view],[data-act],[data-kind],[data-cell],[data-drop],[data-rmp],[data-unbind]');if(!b)return;
+  const b=e.target.closest('[data-open],[data-prod],[data-proj],[data-tab],[data-tfilter],[data-pcell],[data-view],[data-act],[data-kind],[data-cell],[data-drop],[data-rmp],[data-unbind]');if(!b)return;
   if(b.dataset.open){openTask(b.dataset.open);return;}
+  if(b.dataset.prod){openProduct(b.dataset.prod);return;}
+  if(b.dataset.proj){openProj(b.dataset.proj);return;}
+  if(b.dataset.tab){if($('#drawer').open)$('#drawer').close();setTab(b.dataset.tab,true);return;}
+  if(b.dataset.tfilter!==undefined){S.allType=b.dataset.tfilter;renderTabs();return;}
+  if(b.dataset.pcell){cycleStage(b.dataset.pcell,b.dataset.k);return;}
   if(b.dataset.view){S.view=b.dataset.view;try{localStorage.setItem('np-view',S.view);}catch(x){}renderBench();return;}
   if(b.dataset.kind){S.composeKind=b.dataset.kind;renderDrawer();$('#noteIn')?.focus();return;}
   if(b.dataset.cell){cycleCell(b.dataset.cell,b.dataset.t);return;}
@@ -446,13 +703,30 @@ document.addEventListener('click',e=>{
     case 'approveChange':addNote(t.id,'system','老闆核准變更申請：'+t.changeRequest.reason+'，階段解鎖。');patchTask(t,{locked:false,changeRequest:null,lockedAt:null,lockedBy:null});toast('已解鎖');break;
     case 'rejectChange':addNote(t.id,'system','老闆駁回變更申請：'+t.changeRequest.reason);patchTask(t,{changeRequest:null});break;
     case 'addProd':addProduct();break;
+    case 'shiftProd':{const p=S.products.find(x=>x.id===S.openProd);const n=Math.round(+$('#pShift').value||0);if(!p||!n)return;
+      prodCols().forEach(c=>{if((p.cells||{})[c.id]==='done')return;const a=$('#ps-'+c.id),z=$('#pe-'+c.id);if(a&&a.value)a.value=addMonths(a.value,n);if(z&&z.value)z.value=addMonths(z.value,n);});
+      toast(`未完成階段已${n>0?'往後':'往前'}移 ${Math.abs(n)} 個月，記得儲存`);break;}
+    case 'resetProd':prodCols().forEach(c=>{const a=$('#ps-'+c.id),z=$('#pe-'+c.id);if(a)a.value=c.start;if(z)z.value=c.end;});toast('已改回年度時程，記得儲存');break;
+    case 'saveProd':saveProdSched();break;
+    case 'createProj':createProj(b.dataset.f);break;
+    case 'shiftProj':{const p=S.products.find(x=>x.id===S.openProj);const n=Math.round(+$('#jShift').value||0);if(!p||!n)return;
+      p.stages.forEach(x=>{if(x.v==='done')return;const a=$('#js-'+x.k),z=$('#je-'+x.k);if(a&&a.value)a.value=iso(addDays(pd(a.value),n));if(z&&z.value)z.value=iso(addDays(pd(z.value),n));});
+      toast(`未完成階段已${n>0?'往後':'往前'}移 ${Math.abs(n)} 天，記得儲存`);break;}
+    case 'refitProj':{const p=S.products.find(x=>x.id===S.openProj);const du=$('#jDue').value;if(!p)return;if(!du){toast('請先填客戶交期');$('#jDue').focus();return;}
+      const s0=pd($('#js-'+p.stages[0].k).value||p.start);if(days(s0,pd(du))+1<p.stages.length){toast('交期太近，排不下所有階段');return;}
+      genStages(pType(p),s0,pd(du)).forEach(x=>{const a=$('#js-'+x.k),z=$('#je-'+x.k);if(a)a.value=x.start;if(z)z.value=x.end;});toast('已依交期重排，記得儲存');break;}
+    case 'saveProj':saveProj();break;
+    case 'dropProj':{const p=S.products.find(x=>x.id===S.openProj);if(!p)return;const d=!p.dropped;updProj(p,{dropped:d});addNote(p.id,'system',d?'專案停止。':'專案恢復進行。');toast(d?'已停止專案':'已恢復專案');break;}
+    case 'postProj':{const v=($('#noteIn').value||'').trim();if(!v)return;addNote(S.openProj,'comment',v);S.drafts[S.openProj]='';renderDrawer();toast('留言已送出');break;}
     case 'claim':{const v=$('#claimSel').value;if(!v){toast('請先選擇你的名字');return;}S.claims[S.me]=v;render();queue('c:'+S.me,()=>S.db.doc('claims/'+S.me).set({personId:v,at:Date.now()}));toast(`歡迎，${pname(v)}`);break;}
     case 'addPerson':{const n=$('#npName').value.trim(),d=$('#npDept').value,em=$('#npEmail').value.trim();if(!n){toast('請填寫姓名');return;}const id=(em.split('@')[0]||'').replace(/[^A-Za-z0-9_.~-]/g,'')||'p'+Date.now().toString(36);const doc={name:n,dept:d,email:em,pm:false,order:Date.now()};S.people[id]=doc;render();queue('pp:'+id,()=>S.db.doc('people/'+id).set(doc));toast('已加入 '+n);break;}
     case 'saveSet':{const d=S.setDraft||settings();S.settings=d;S.setDraft=null;render();queue('set',()=>S.db.doc('settings/reminders').set(d));toast('提醒規則已儲存');break;}
   }
 });
-function openTask(id){S.open=id;S.form=null;S.editDates=false;renderDrawer();const d=$('#drawer');if(!d.open)d.showModal();}
-$('#drawer').addEventListener('close',()=>{S.open=null;S.form=null;S.editDates=false;});
+function openTask(id){S.open=id;S.openProd=null;S.openProj=null;S.form=null;S.editDates=false;renderDrawer();const d=$('#drawer');if(!d.open)d.showModal();}
+function openProduct(id){S.openProd=id;S.open=null;S.openProj=null;S.form=null;renderDrawer();const d=$('#drawer');if(!d.open)d.showModal();}
+function openProj(id){S.openProj=id;S.open=null;S.openProd=null;S.form=null;renderDrawer();const d=$('#drawer');if(!d.open)d.showModal();}
+$('#drawer').addEventListener('close',()=>{S.open=null;S.openProd=null;S.openProj=null;S.form=null;S.editDates=false;});
 $('#drawer').addEventListener('click',e=>{if(e.target===e.currentTarget)e.currentTarget.close();});
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='newProd'){e.preventDefault();addProduct();}});
 addEventListener('np-blob-urls',()=>{if(S.open)renderDrawer();});
@@ -462,9 +736,63 @@ function cycleCell(pid,tid){
   const cells={...(p.cells||{})};const v=cells[tid]||'';cells[tid]=CELL[(CELL.indexOf(v)+1)%CELL.length];
   p.cells=cells;render();queue('p:'+pid,()=>S.db.doc('products/'+pid).update({cells}));
 }
+function updProj(p,patch){Object.assign(p,patch);render();if(live())queue('p:'+p.id,()=>S.db.doc('products/'+p.id).update(patch));}
+function cycleStage(pid,k){
+  const p=S.products.find(x=>x.id===pid);if(!p||p.dropped||!canAct())return;
+  const st=clone(p.stages||[]);const x=st.find(y=>y.k===k);if(!x)return;
+  x.v=CELL[(CELL.indexOf(x.v||'')+1)%CELL.length];x.by=S.me;x.at=Date.now();updProj(p,{stages:st});
+}
+function createProj(f){
+  if(!isMgr()||!canAct())return;
+  const ty=f==='af'?$('#afType').value:S.tab;const name=$('#'+f+'Name').value.trim();
+  if(!name){toast('請填寫專案名稱');$('#'+f+'Name').focus();return;}
+  const id='p'+Date.now().toString(36);let doc;
+  if(ty==='internal')doc={type:'internal',name,order:Date.now(),cells:{},dropped:false,by:S.me,at:Date.now()};
+  else{
+    const sv=$('#'+f+'Start').value,dv=$('#'+f+'Due').value;
+    if(!sv){toast('請填開始日');$('#'+f+'Start').focus();return;}
+    const s0=pd(sv),due=dv?pd(dv):null;
+    if(due&&days(s0,due)+1<PTYPES[ty].stages.length){toast('交期必須晚於開始日，且至少留 '+PTYPES[ty].stages.length+' 天');$('#'+f+'Due').focus();return;}
+    doc={type:ty,name,client:$('#'+f+'Client').value.trim(),lead:$('#'+f+'Lead').value||null,start:sv,due:dv||null,
+      stages:genStages(ty,s0,due),dropped:false,order:Date.now(),by:S.me,at:Date.now()};
+  }
+  S.products.push({id,...doc});['Name','Client','Due'].forEach(k=>{const el=$('#'+f+k);if(el)el.value='';});
+  render();if(live())queue('p:'+id,()=>S.db.doc('products/'+id).set(doc));
+  toast(`已建立${PTYPES[ty].l}：${name}`);
+  if(ty==='internal')setTab('internal');else{if(f==='af')setTab(ty);openProj(id);}
+}
+function saveProj(){
+  const p=S.products.find(x=>x.id===S.openProj);if(!p||!isMgr()||!canAct())return;
+  const st=clone(p.stages);
+  for(const x of st){const a=$('#js-'+x.k).value,z=$('#je-'+x.k).value;
+    if(!a||!z){toast(`「${x.n}」的開始與結束日期都要填`);return;}
+    if(z<a){toast(`「${x.n}」結束日不能早於開始日`);$('#je-'+x.k).focus();return;}
+    x.start=a;x.end=z;}
+  const before=`${p.stages[0].start}~${p.stages[p.stages.length-1].end}`,after=`${st[0].start}~${st[st.length-1].end}`;
+  const moved=st.filter((x,i)=>x.start!==p.stages[i].start||x.end!==p.stages[i].end).length;
+  const patch={stages:st,client:$('#jClient').value.trim(),due:$('#jDue').value||null,start:st[0].start};
+  const r=$('#jReason').value.trim();
+  updProj(p,patch);
+  if(moved)addNote(p.id,'system',`時程調整（${moved} 個階段）：${before} → ${after}${r?'。原因：'+r:''}`);
+  toast('已儲存');
+}
+function saveProdSched(){
+  const p=S.products.find(x=>x.id===S.openProd);if(!p||!isMgr()||!canAct())return;
+  const sched={};
+  for(const t of prodCols()){
+    const a=$('#ps-'+t.id)?.value,z=$('#pe-'+t.id)?.value;
+    if(!a||!z){toast(`「${t.sub}」的開始與結束月份都要填`);return;}
+    if(z<a){toast(`「${t.sub}」結束月份不能早於開始月份`);$('#pe-'+t.id).focus();return;}
+    if(a!==t.start||z!==t.end)sched[t.id]={start:a,end:z};
+  }
+  const patch={sched,schedBy:S.me,schedAt:Date.now()};
+  Object.assign(p,patch);$('#drawer').close();render();
+  if(live())queue('p:'+p.id,()=>S.db.doc('products/'+p.id).update(patch));
+  toast(`${p.name} 的時程已儲存`);
+}
 function addProduct(){
   const el=$('#newProd');const v=(el?.value||'').trim();if(!v)return;
-  const id='p'+Date.now().toString(36);const doc={name:v,order:Date.now(),cells:{},dropped:false,by:S.me,at:Date.now()};
+  const id='p'+Date.now().toString(36);const doc={type:'internal',name:v,order:Date.now(),cells:{},dropped:false,by:S.me,at:Date.now()};
   S.products.push({id,...doc});render();$('#newProd')?.focus();
   queue('p:'+id,()=>S.db.doc('products/'+id).set(doc));
 }
@@ -496,7 +824,7 @@ async function importTemplate(btn){
 const bar=$('#prog');const links=[...document.querySelectorAll('.nav a')];const secs=links.map(a=>document.querySelector(a.getAttribute('href')));
 let ticking=false;
 function onScroll(){ticking=false;const h=document.documentElement;const max=h.scrollHeight-h.clientHeight;bar.style.transform=`scaleX(${max>0?Math.min(h.scrollTop/max,1):0})`;
-  let cur=0;secs.forEach((s,i)=>{if(s.getBoundingClientRect().top<120)cur=i;});links.forEach((a,i)=>a.classList.toggle('on',i===cur));}
+  if(S.tab!=='internal')return;let cur=0;secs.forEach((s,i)=>{if(s.getBoundingClientRect().top<120)cur=i;});links.forEach((a,i)=>a.classList.toggle('on',i===cur));}
 addEventListener('scroll',()=>{if(!ticking){ticking=true;requestAnimationFrame(onScroll);}},{passive:true});
 addEventListener('resize',onScroll);
 
@@ -504,13 +832,18 @@ addEventListener('resize',onScroll);
 async function resolveNames(force){
   if(!S.user)return;const ids=new Set(Object.keys(S.claims));S.me&&ids.add(S.me);
   S.tasks.forEach(t=>{t.checklist.forEach(c=>c.by&&ids.add(c.by));[t.lead,t.lockedBy,t.changeRequest?.by,t.blocked?.by].forEach(x=>x&&ids.add(x));});
-  S.notes.forEach(n=>n.by&&ids.add(n.by));S.files.forEach(f=>f.by&&ids.add(f.by));
+  S.notes.forEach(n=>n.by&&ids.add(n.by));S.products.forEach(p=>(p.stages||[]).forEach(x=>x.by&&ids.add(x.by)));S.files.forEach(f=>f.by&&ids.add(f.by));
   const need=[...ids].filter(i=>force||!(i in S.names));if(!need.length)return;
   try{const ps=await S.user.profiles(need);need.forEach(i=>{S.names[i]=(ps[i]&&ps[i].name)||'';});render();}catch(e){}
 }
 
 /* ---------- boot ---------- */
+function tabFromHash(){const h=location.hash.slice(1);if(['all','internal','external','gift'].includes(h))return h;if(h&&document.getElementById(h)?.closest('#pane-internal'))return 'internal';return null;}
+{let t=tabFromHash();if(!t)try{t=localStorage.getItem('np-tab');}catch(e){}S.tab=['all','internal','external','gift'].includes(t)?t:'all';}
+addEventListener('hashchange',()=>{const t=tabFromHash();if(t&&t!==S.tab)setTab(t);});
+document.getElementById('tabs').addEventListener('keydown',e=>{if(e.key!=='ArrowRight'&&e.key!=='ArrowLeft')return;const ts=[...document.querySelectorAll('.tab')];const i=ts.findIndex(x=>x.dataset.tab===S.tab);const n=ts[(i+(e.key==='ArrowRight'?1:ts.length-1))%ts.length];setTab(n.dataset.tab);n.focus();});
 render();onScroll();
+if(S.tab==='internal'&&location.hash&&location.hash!=='#overview')requestAnimationFrame(()=>document.querySelector(location.hash)?.scrollIntoView());
 (async()=>{
   if(!window.claude||!window.claude.use){S.mode='offline';render();return;}
   const [db,user,assets]=await Promise.all([claude.use('db'),claude.use('user'),claude.use('assets').catch(()=>null)]);

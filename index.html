@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style>
-<title>2027 新品開發進度</title>
+<title>專案進度 · 新品・設計案・企禮</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=IBM+Plex+Mono:wght@500;600&display=swap">
@@ -36,7 +36,7 @@
   --shadow:0 10px 30px rgba(0,0,0,.5); color-scheme:dark;
 }
 *{box-sizing:border-box}
-html{scroll-behavior:smooth;scroll-padding-top:72px}
+html{scroll-behavior:smooth;scroll-padding-top:116px}
 body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:15px;line-height:1.6}
 .wrap{max-width:1240px;margin:0 auto;padding-inline:16px}
 h1,h2,h3{text-wrap:balance;margin:0;line-height:1.25}
@@ -55,6 +55,15 @@ button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-vis
 .progress i{display:block;height:100%;background:var(--accent-bright);transform-origin:0 50%;transform:scaleX(0);transition:transform .12s linear}
 @media (prefers-reduced-motion:reduce){.progress i{transition:none}html{scroll-behavior:auto}}
 @media (max-width:700px){.brand small{display:none}}
+.tabs{border-top:1px solid var(--line)}
+.tabs .wrap{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;height:auto}
+.tab{border:0;background:none;padding:10px 14px;font-size:14px;font-weight:500;color:var(--muted);border-bottom:3px solid transparent;white-space:nowrap}
+.tab[aria-selected="true"]{color:var(--fg);font-weight:700;border-bottom-color:var(--accent-bright)}
+.tab .num{font-size:12px;margin-left:6px;color:var(--muted)}
+.tb{display:inline-block;font-size:11px;font-weight:700;padding:1px 7px;border-radius:4px;white-space:nowrap}
+.tb-internal{background:var(--accent-soft);color:var(--accent)}
+.tb-external{background:var(--info-soft);color:var(--info)}
+.tb-gift{background:var(--warn-soft);color:var(--warn)}
 
 section{padding-block:48px;border-bottom:1px solid var(--line)}
 .eyebrow{font-size:12px;letter-spacing:.14em;color:var(--accent);font-weight:700}
@@ -175,7 +184,53 @@ table.pm{border-collapse:collapse;width:100%;min-width:760px;font-size:13px}
 .cell.done{background:var(--accent-soft);color:var(--accent);border-color:transparent}
 .cell.issue{background:var(--danger-soft);color:var(--danger);border-color:transparent}
 .cell:disabled{cursor:default}
+.cd{font-family:var(--font-data);font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap}
+.cd.custom{color:var(--fg);font-weight:700}
+.cd.late{color:var(--danger);font-weight:700}
+table.ptab{border-collapse:collapse;width:100%;font-size:13px}
+.ptab th,.ptab td{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;vertical-align:middle}
+.ptab thead th{font-size:12px;color:var(--muted)}
+.ptab tbody th{font-weight:600}
+.ptab input[type=month]{width:100%;min-width:120px}
 .addrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+/* project tabs: date-based timeline + project list */
+.newp{border:1px solid var(--line);border-radius:10px;padding:16px;margin-top:24px;display:grid;gap:12px}
+.newp h3{font-size:16px}
+.newp .fl{display:flex;gap:12px;flex-wrap:wrap;align-items:end}
+.newp label{display:grid;gap:4px;font-size:13px;color:var(--muted)}
+.newp input[type=text]{width:220px}
+.tstats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:24px}
+@media (max-width:820px){.tstats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.tstats button.stat{text-align:left;background:var(--bg);font:inherit;color:inherit}
+.tstats button.stat:hover{border-color:var(--muted)}
+.dgw{position:relative;min-width:calc(var(--label) + var(--tw))}
+.dg{--label:260px;display:grid;grid-template-columns:var(--label) minmax(var(--tw),1fr);font-size:13px}
+.dg-lab{position:sticky;left:0;z-index:2;background:var(--bg);border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:8px 12px;min-height:52px;display:flex;flex-direction:column;justify-content:center;gap:2px;min-width:0}
+.dg-lab .linkbtn{font-size:13px}
+.dg-hl{position:sticky;left:0;z-index:3;background:var(--surface);border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:0 12px;font-weight:700;height:34px;display:flex;align-items:center}
+.dg-hd{position:relative;background:var(--surface);border-bottom:1px solid var(--line);height:34px}
+.dg-hd span{position:absolute;top:0;bottom:0;display:flex;align-items:center;padding-left:6px;font-size:12px;font-family:var(--font-data);color:var(--muted);white-space:nowrap;border-left:1px solid var(--line)}
+.dg-hd span b{color:var(--fg);margin-right:4px}
+.dg-tr{position:relative;border-bottom:1px solid var(--line);min-height:52px}
+.dg-lines{position:absolute;top:34px;bottom:0;left:var(--label);right:0;pointer-events:none}
+.dg-lines i{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}
+.dg-lines .today{width:2px;background:var(--danger);z-index:1}
+.dg-seg{position:absolute;top:12px;bottom:12px;min-width:4px;border-radius:4px;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-size:11px;font-weight:700;padding:0 4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;text-align:left;z-index:1}
+.dg-seg.s-active{background:var(--info-soft);color:var(--info);border-color:var(--info)}
+.dg-seg.s-done{background:var(--accent-soft);color:var(--accent);border-color:transparent}
+.dg-seg.s-issue{background:var(--block-soft);color:var(--block);border-color:var(--block)}
+.dg-seg.s-late{background:var(--danger-soft);color:var(--danger);border-color:var(--danger)}
+.dg-seg:hover{filter:brightness(.97)}
+.lg-seg{display:inline-flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
+.lg-seg i{position:static;display:inline-block;width:18px;height:12px}
+.plist{border:1px solid var(--line);border-radius:10px;overflow-x:auto;margin-top:24px}
+table.pl{border-collapse:collapse;width:100%;min-width:820px;font-size:13px}
+.pl th,.pl td{border-bottom:1px solid var(--line);padding:10px 8px;text-align:left;vertical-align:middle}
+.pl thead th{background:var(--surface);font-size:12px}
+.pl tr:last-child td{border-bottom:0}
+.pl tr.dropped td{opacity:.5}
+.pl .bar{width:90px}
+.pl td.c{text-align:center}
 .addrow input{max-width:320px}
 
 .dash{display:grid;grid-template-columns:1fr 1fr;gap:16px}
@@ -277,7 +332,7 @@ textarea,input[type=text],input[type=search]{font:inherit;font-size:14px;width:1
 </head>
 <body>
 <div class="gate" id="gate"><div class="gate-card">
-  <h1>新品開發進度</h1>
+  <h1>專案進度</h1>
   <p id="gateMsg">正在確認登入狀態…</p>
   <button class="btn primary" id="gateLogin" hidden>使用 Google 帳號登入</button>
   <button class="btn" id="gateLogout" hidden>改用其他帳號</button>
@@ -285,15 +340,79 @@ textarea,input[type=text],input[type=search]{font:inherit;font-size:14px;width:1
 
 <header class="top">
   <div class="wrap">
-    <div class="brand">新品開發進度<small>2027 年度新品</small></div>
-    <nav class="nav" aria-label="頁面章節">
+    <div class="brand">專案進度<small>內部新品・外部設計・企禮客製</small></div>
+    <nav class="nav" id="secNav" aria-label="頁面章節">
       <a href="#overview">總覽</a><a href="#bench">工作台</a><a href="#gantt">甘特圖</a><a href="#products">產品</a><a href="#dash">儀表</a><a href="#remind">提醒</a><a href="#rules">規則</a>
     </nav>
   </div>
+  <div class="tabs"><div class="wrap" role="tablist" aria-label="專案類型" id="tabs">
+    <button class="tab" role="tab" id="tab-all" data-tab="all" aria-controls="pane-all">全部專案</button>
+    <button class="tab" role="tab" id="tab-internal" data-tab="internal" aria-controls="pane-internal">內部新品開發</button>
+    <button class="tab" role="tab" id="tab-external" data-tab="external" aria-controls="pane-type">外部設計案</button>
+    <button class="tab" role="tab" id="tab-gift" data-tab="gift" aria-controls="pane-type">企禮客製案</button>
+  </div></div>
   <div class="progress" aria-hidden="true"><i id="prog"></i></div>
 </header>
 
 <main>
+<div id="pane-all" role="tabpanel" aria-labelledby="tab-all" hidden>
+  <section id="all">
+    <div class="wrap">
+      <div class="sec-head">
+        <div><div class="eyebrow">全部專案</div><h2>公司所有專案進度一覽</h2>
+        <p>內部新品、外部設計案、企禮客製案放在一起看。各類型的時程細節請到上方分頁；這裡只看誰落後、誰快到期。點專案名稱或色條開啟詳情。</p></div>
+      </div>
+      <div id="allBanner"></div>
+      <div class="tstats" id="allStats"></div>
+      <div class="toolbar"><div class="roles" id="allFilter" role="group" aria-label="類型篩選" style="margin:0"></div>
+        <label><input type="checkbox" id="allClosed">顯示已完成與停止的專案</label>
+        <div class="legend" id="allLegend"></div></div>
+      <div class="gscroll" id="allGantt"></div>
+      <div class="plist" id="allList"></div>
+      <div class="newp" id="afForm" hidden>
+        <h3>新增專案</h3>
+        <div class="fl">
+          <label for="afName">專案名稱<input type="text" id="afName" placeholder="例如：某品牌 2027 春節禮盒"></label>
+          <label for="afType">類型<select id="afType"><option value="external">外部設計案</option><option value="gift">企禮客製案</option><option value="internal">內部新品開發</option></select></label>
+          <label for="afClient" data-ext>客戶<input type="text" id="afClient" placeholder="客戶名稱"></label>
+          <label for="afStart" data-ext>開始日<input type="date" id="afStart"></label>
+          <label for="afDue" data-ext>客戶交期（選填）<input type="date" id="afDue"></label>
+          <label for="afLead" data-ext>主責<select id="afLead"><option value="">未指定</option></select></label>
+          <button class="btn primary" data-act="createProj" data-f="af">建立專案</button>
+        </div>
+        <div class="sub" id="afHint"></div>
+      </div>
+    </div>
+  </section>
+</div>
+<div id="pane-type" role="tabpanel" hidden>
+  <section id="typeSec">
+    <div class="wrap">
+      <div class="sec-head">
+        <div><div class="eyebrow" id="tyEyebrow"></div><h2 id="tyTitle"></h2><p id="tyDesc"></p></div>
+        <div id="tySummary"></div>
+      </div>
+      <div id="tyBanner"></div>
+      <div class="toolbar"><label><input type="checkbox" id="tyClosed">顯示已完成與停止的專案</label><div class="legend" id="tyLegend"></div></div>
+      <div class="gscroll" id="tyGantt"></div>
+      <div class="plist" id="tyList"></div>
+      <div class="newp" id="tfForm" hidden>
+        <h3>新增專案</h3>
+        <div class="fl">
+          <label for="tfName">專案名稱<input type="text" id="tfName" placeholder="例如：某品牌 2027 春節禮盒"></label>
+          
+          <label for="tfClient" data-ext>客戶<input type="text" id="tfClient" placeholder="客戶名稱"></label>
+          <label for="tfStart" data-ext>開始日<input type="date" id="tfStart"></label>
+          <label for="tfDue" data-ext>客戶交期（選填）<input type="date" id="tfDue"></label>
+          <label for="tfLead" data-ext>主責<select id="tfLead"><option value="">未指定</option></select></label>
+          <button class="btn primary" data-act="createProj" data-f="tf">建立專案</button>
+        </div>
+        <div class="sub" id="tfHint"></div>
+      </div>
+    </div>
+  </section>
+</div>
+<div id="pane-internal" role="tabpanel" aria-labelledby="tab-internal" hidden>
   <section id="overview" class="hero">
     <div class="wrap">
       <div id="banner"></div>
@@ -327,11 +446,14 @@ textarea,input[type=text],input[type=search]{font:inherit;font-size:14px;width:1
     <div class="wrap">
       <div class="sec-head">
         <div><div class="eyebrow">甘特圖</div><h2>年度新品時程表（月單位）</h2>
-        <p>色條深色部分為完成比例，虛線框是原訂時程。紅線是今天，紅框逾期，紫框卡住，黑框已定案。點色條開啟詳情。</p></div>
+        <p>色條深色部分為完成比例，虛線框是原訂時程。紅線是今天，紅框逾期，紫框卡住，黑框已定案。點色條開啟詳情。選擇「品項」可看單一新品的個別時程。</p></div>
       </div>
       <div class="toolbar">
         <label for="fDept">負責單位
           <select id="fDept"><option value="">全部</option></select>
+        </label>
+        <label for="fProd">品項
+          <select id="fProd"><option value="">年度階段</option></select>
         </label>
         <div class="legend" id="legend"></div>
       </div>
@@ -343,7 +465,7 @@ textarea,input[type=text],input[type=search]{font:inherit;font-size:14px;width:1
     <div class="wrap">
       <div class="sec-head">
         <div><div class="eyebrow">產品進度</div><h2>每一款新品走到哪裡</h2>
-        <p>第 2 階段定案後，把今年的新品逐款加入。點格子切換狀態：未開始、進行中、完成、有問題。停止開發的品項會保留紀錄但淡出。</p></div>
+        <p>第 2 階段定案後，把今年的新品逐款加入。點格子切換狀態：未開始、進行中、完成、有問題。格子下方是該品項這個階段的時程，粗體為自訂；點品名可個別調整時程。停止開發的品項會保留紀錄但淡出。</p></div>
         <div id="prodSummary"></div>
       </div>
       <div id="prodWrap"></div>
@@ -388,8 +510,9 @@ textarea,input[type=text],input[type=search]{font:inherit;font-size:14px;width:1
       </div>
     </div>
   </section>
+</div>
 </main>
-<footer><div class="wrap">新品開發流程優化提案 · 時程依 2026/6 – 2027/9 年度規劃</div></footer>
+<footer><div class="wrap">專案進度追蹤 · 內部新品依 2026/6 – 2027/9 年度規劃，外部設計案與企禮客製案各自排程</div></footer>
 
 <dialog id="drawer" aria-labelledby="dwTitle"><div class="dw" id="dw"></div></dialog>
 <div id="toast" class="toast" role="status" hidden></div>
