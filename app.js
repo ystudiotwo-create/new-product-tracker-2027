@@ -117,11 +117,9 @@ function genStages(ty,start,due){
     const st={k,n,start:iso(addDays(start,prev)),end:iso(addDays(start,b-1)),v:''};prev=b;return st;});
 }
 const tplDays=ty=>PTYPES[ty].stages.reduce((a,x)=>a+x[2],0);
-const planCell=t=>{const k=status(t).k;return k==='lock'?'done':k==='blocked'?'issue':['active','over','done','review'].includes(k)?'active':'';};
 function normProj(p){
   let st;
-  if(p.kind==='plan')st=sorted().map(t=>({k:t.id,n:t.sub,s:tStart(t),e:tEnd(t),v:planCell(t)}));
-  else if(isInternal(p)){const c=p.cells||{};st=prodCols().map(t=>({k:t.id,n:t.sub,s:pStart(p,t),e:pEnd(p,t),v:c[t.id]||''}));}
+  if(isInternal(p)){const c=p.cells||{};st=prodCols().map(t=>({k:t.id,n:t.sub,s:pStart(p,t),e:pEnd(p,t),v:c[t.id]||''}));}
   else st=(p.stages||[]).map(x=>({k:x.k,n:x.n,s:pd(x.start),e:pd(x.end),v:x.v||''}));
   const td=today();st.forEach(x=>x.late=!p.dropped&&x.v!=='done'&&td>x.e);
   const done=st.filter(x=>x.v==='done').length;
@@ -135,15 +133,12 @@ function normProj(p){
   else if(lateD>0)state={k:'over',l:'逾期 '+lateD+' 天'};
   else if(td<start)state={k:'todo',l:'未開始'};
   else state={k:'active',l:'進行中'};
-  return {p,type:p.kind==='plan'?'internal':pType(p),name:p.name,stages:st,start,end,done,total:st.length,cur,state,
+  return {p,type:pType(p),name:p.name,stages:st,start,end,done,total:st.length,cur,state,
     closed:!!p.dropped||(st.length>0&&done===st.length),due:p.due?pd(p.due):end};
 }
-function allProjects(){
-  const list=S.products.map(normProj);
-  if(S.tasks.length)list.unshift(normProj({id:'plan',kind:'plan',name:'年度新品開發計畫（全體階段）'}));
-  return list;
-}
-const openAttr=P=>P.p.kind==='plan'?'data-tab="internal"':isInternal(P.p)?`data-prod="${esc(P.p.id)}"`:`data-proj="${esc(P.p.id)}"`;
+// the annual stage plan is not a project of its own: internal products already carry its stages
+const allProjects=()=>S.products.map(normProj);
+const openAttr=P=>isInternal(P.p)?`data-prod="${esc(P.p.id)}"`:`data-proj="${esc(P.p.id)}"`;
 const pcolOrder=P=>(P.state.k==='over'||P.state.k==='blocked'?0:1);
 const sortProj=list=>list.slice().sort((a,b)=>(a.closed-b.closed)||(pcolOrder(a)-pcolOrder(b))||(a.due-b.due));
 
@@ -368,7 +363,7 @@ function renderProducts(){
 function projRow(P){
   const pc=P.total?Math.round(P.done/P.total*100):0;
   return `<tr class="${P.p.dropped?'dropped':''}"><td><button class="linkbtn" ${openAttr(P)}>${esc(P.name)}</button>${P.p.client?`<div class="sub">${esc(P.p.client)}</div>`:''}</td>
-    <td>${typeBadge(P.type)}</td><td>${esc(P.p.lead?pname(P.p.lead):P.p.kind==='plan'?'各階段主責':'未指定')}</td>
+    <td>${typeBadge(P.type)}</td><td>${esc(P.p.lead?pname(P.p.lead):'未指定')}</td>
     <td>${P.cur&&!P.p.dropped?esc(P.cur.n)+`<div class="sub">${md(P.cur.s)}–${md(P.cur.e)}</div>`:'—'}</td>
     <td><div class="row" style="flex-wrap:nowrap"><div class="bar"><i style="width:${pc}%"></i></div><span class="num sub">${P.done}/${P.total}</span></div></td>
     <td class="num">${ymd(P.start)} – ${ymd(P.end)}</td><td>${pill(P.state)}</td></tr>`;
@@ -388,8 +383,8 @@ function renderAll(){
   const list=allProjects();const open=list.filter(P=>!P.closed);
   $('#allStats').innerHTML=TYPE_KEYS.map(ty=>{const l=open.filter(P=>P.type===ty);const o=l.filter(P=>P.state.k==='over'||P.state.k==='blocked').length;
     const nx=l.filter(P=>P.due>=today()).sort((a,b)=>a.due-b.due)[0];
-    return `<button class="stat" data-tab="${ty}"><div class="k">${typeBadge(ty)}</div><div class="v num">${ty==='internal'?l.filter(P=>P.p.kind!=='plan').length:l.length}<small>${ty==='internal'?'款開發中':'案進行中'}</small></div><div class="s">${o?`<span style="color:var(--danger)">${o} 項落後或有問題</span>`:'沒有落後'}${nx?` · 最近交期 ${md(nx.due)}`:''}</div></button>`;}).join('')+
-    `<div class="stat hot"><div class="k">全公司</div><div class="v num">${open.filter(P=>P.p.kind!=='plan').length}<small>個專案進行中</small></div><div class="s">${open.filter(P=>P.state.k==='over').length} 項逾期</div></div>`;
+    return `<button class="stat" data-tab="${ty}"><div class="k">${typeBadge(ty)}</div><div class="v num">${l.length}<small>${ty==='internal'?'款開發中':'案進行中'}</small></div><div class="s">${o?`<span style="color:var(--danger)">${o} 項落後或有問題</span>`:'沒有落後'}${nx?` · 最近交期 ${md(nx.due)}`:''}</div></button>`;}).join('')+
+    `<div class="stat hot"><div class="k">全公司</div><div class="v num">${open.length}<small>個專案進行中</small></div><div class="s">${open.filter(P=>P.state.k==='over').length} 項逾期</div></div>`;
   $('#allFilter').innerHTML='<span>類型</span>'+[['','全部']].concat(TYPE_KEYS.map(k=>[k,PTYPES[k].l])).map(([k,l])=>`<button class="chip" aria-pressed="${S.allType===k}" data-tfilter="${k}">${l}</button>`).join('');
   $('#allClosed').checked=S.showClosed;$('#allLegend').innerHTML=dgLegend();
   const shown=sortProj(list.filter(P=>(!S.allType||P.type===S.allType)&&(S.showClosed||!P.closed)));
