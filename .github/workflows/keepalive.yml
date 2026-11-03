@@ -1,0 +1,46 @@
+# Supabase pauses free projects after 7 days without activity; ping the database every 2 days.
+# The call is is_member(), which anyone may run (it returns false without a login), so no secret is needed.
+name: Keep Supabase awake
+
+on:
+  schedule:
+    - cron: '17 1 */2 * *'   # every 2 days, 09:17 Taiwan time
+  workflow_dispatch:          # "Run workflow" button for a manual check
+
+permissions:
+  contents: write
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ping Supabase database
+        run: |
+          URL=$(grep -oP "url: '\K[^']+" config.js)
+          KEY=$(grep -oP "anonKey: '\K[^']+" config.js)
+          for i in 1 2 3; do
+            code=$(curl -s -o out.txt -w '%{http_code}' -X POST "$URL/rest/v1/rpc/is_member" \
+              -H "apikey: $KEY" -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d '{}')
+            echo "HTTP $code: $(cat out.txt)"
+            [ "$code" = "200" ] && exit 0
+            sleep 30
+          done
+          echo "::error::Supabase did not answer. The project may be paused: restore it at https://supabase.com/dashboard"
+          exit 1
+
+      # GitHub switches off scheduled workflows after 60 days without commits, so leave a small one at 45 days
+      - name: Keep this schedule enabled
+        run: |
+          last=$(git log -1 --format=%ct)
+          if [ $(( $(date +%s) - last )) -gt $(( 45 * 86400 )) ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+            date -u +%FT%TZ > .github/keepalive
+            git add .github/keepalive
+            git commit -m "keepalive: keep the Supabase ping schedule enabled"
+            git push
+          else
+            echo "Recent commit found, nothing to do."
+          fi
