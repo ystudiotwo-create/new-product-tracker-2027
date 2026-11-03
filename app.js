@@ -136,9 +136,27 @@ function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
 const tplOf=(ty,kind)=>{const T=PTYPES[ty];return T.kinds?(T.kinds[kind]||Object.values(T.kinds)[0]).stages:T.stages;};
 const kindL=p=>PTYPES[pType(p)].kinds?.[p.kind]?.l||'';
 const fmtDur=d=>d+' 個工作天'+(d>=10?`（約 ${Math.round(d/5)} 週）`:'');
-/* workdays: stage lengths count Monday–Friday only */
+/* workdays: stage lengths count Monday–Friday, minus Taiwan's national holidays */
 const BUF=3; // workdays of slack between the last stage and the deadline
-const isWork=d=>d.getDay()!==0&&d.getDay()!==6;
+// weekday days off from the DGPA office calendars (政府行政機關辦公日曆表), 補假 included; add each new year when it is published (usually June)
+const HOLIDAYS=new Map([
+ // 115 年（2026）
+ ['2026-01-01','開國紀念日'],
+ ['2026-02-16','春節'],['2026-02-17','春節'],['2026-02-18','春節'],['2026-02-19','春節'],['2026-02-20','春節補假'],
+ ['2026-02-27','和平紀念日補假'],['2026-04-03','兒童節補假'],['2026-04-06','清明節補假'],['2026-05-01','勞動節'],
+ ['2026-06-19','端午節'],['2026-09-25','中秋節'],['2026-09-28','教師節'],['2026-10-09','國慶日補假'],
+ ['2026-10-26','光復節補假'],['2026-12-25','行憲紀念日'],
+ // 116 年（2027）
+ ['2027-01-01','開國紀念日'],
+ ['2027-02-04','春節'],['2027-02-05','除夕'],['2027-02-08','春節'],['2027-02-09','春節補假'],['2027-02-10','春節補假'],
+ ['2027-03-01','和平紀念日補假'],['2027-04-05','清明節'],['2027-04-06','兒童節補假'],['2027-04-30','勞動節補假'],
+ ['2027-06-09','端午節'],['2027-09-15','中秋節'],['2027-09-28','教師節'],['2027-10-11','國慶日補假'],
+ ['2027-10-25','光復節'],['2027-12-24','行憲紀念日補假'],['2027-12-31','開國紀念日補假']
+]);
+const HOLI_UNTIL='2027-12-31';
+const isWork=d=>d.getDay()!==0&&d.getDay()!==6&&!HOLIDAYS.has(iso(d));
+// national holidays that fall on weekdays between a and b
+const holidaysIn=(a,b)=>[...HOLIDAYS].filter(([k])=>k>=iso(a)&&k<=iso(b));
 function nextWork(d){let x=new Date(d);while(!isWork(x))x=addDays(x,1);return x;}
 function prevWork(d){let x=new Date(d);while(!isWork(x))x=addDays(x,-1);return x;}
 // move n workdays from d (d is first snapped to a workday in the direction of travel)
@@ -428,16 +446,18 @@ function syncForm(f,ty){
   if(dueAuto)dueEl.value=iso(addWork(workEnd,BUF));
   const reset=dueAuto?'':` <button class="linkbtn sub" data-act="dueAuto" data-f="${f}">改回自動計算</button>`;
   const flow=`${on.length} 個階段：${on.map(x=>esc(x.n)).join(' → ')}。`;
-  if(dueAuto)hint.innerHTML=`${flow}共 ${fmtDur(tot)}，週末不計；${ymd(s0)} 開始、預計 ${ymd(workEnd)} 完成；期限自動設為再加 ${BUF} 個工作天緩衝：<b>${ymd(pd(dueEl.value))}</b>。`;
+  const hs=holidaysIn(s0,dueEl.value?pd(dueEl.value):workEnd),names=[...new Set(hs.map(h=>h[1].replace('補假','')))];
+  const holTxt=(hs.length?`期間避開 ${hs.length} 天國定假日（${names.join('、')}）。`:'')+(iso(dueEl.value?pd(dueEl.value):workEnd)>HOLI_UNTIL?`<span style="color:var(--warn)">${HOLI_UNTIL.slice(0,4)} 年以後的國定假日尚未公布，只扣除週末。</span>`:'');
+  if(dueAuto)hint.innerHTML=`${flow}共 ${fmtDur(tot)}，週末與國定假日不計；${ymd(s0)} 開始、預計 ${ymd(workEnd)} 完成；期限自動設為再加 ${BUF} 個工作天緩衝：<b>${ymd(pd(dueEl.value))}</b>。${holTxt}`;
   else if(!dueEl.value)hint.innerHTML=`${flow}請填期限，或${reset}`;
   else{const last=addWork(pd(dueEl.value),-BUF),av=countWork(s0,last);
     hint.innerHTML=av<on.length?`<span style="color:var(--danger)">期限太近：扣掉 ${BUF} 個工作天緩衝後只剩 ${Math.max(av,0)} 個工作天，排不下 ${on.length} 個階段。</span>${reset}`
-      :`${flow}依你填的期限排程：扣掉 ${BUF} 個工作天緩衝，各階段等比例排進 ${ymd(s0)}–${ymd(last)}（${av} 個工作天，範本需要 ${tot} 個）${av<tot?'，<span style="color:var(--danger)">比範本緊</span>':''}。${reset}`;}
+      :`${flow}依你填的期限排程：扣掉 ${BUF} 個工作天緩衝，各階段等比例排進 ${ymd(s0)}–${ymd(last)}（${av} 個工作天，範本需要 ${tot} 個）${av<tot?'，<span style="color:var(--danger)">比範本緊</span>':''}。${holTxt}${reset}`;}
 }
 // editable stage list in the create form: untick what this project skips, rename, change days, add more
 function drawStages(f){
   const el=$('#'+f+'Stages'),D=S.stDraft[f];if(!el||!D)return;
-  el.innerHTML='<div class="sub">階段：取消勾選代表這個專案不需要；天數是工作天（週一到週五），可以改。</div>'+D.list.map((x,i)=>`<div class="stg-row">
+  el.innerHTML='<div class="sub">階段：取消勾選代表這個專案不需要；天數是工作天（不含週末與國定假日），可以改。</div>'+D.list.map((x,i)=>`<div class="stg-row">
     <input type="checkbox" id="${f}-so-${i}" data-sf="${f}" data-si="${i}" data-sp="on" ${x.on?'checked':''} aria-label="包含 ${esc(x.n)}">
     <label for="${f}-sn-${i}" class="vh">階段名稱</label><input type="text" id="${f}-sn-${i}" data-sf="${f}" data-si="${i}" data-sp="n" value="${esc(x.n)}">
     <label for="${f}-sd-${i}" class="vh">${esc(x.n)} 天數</label><input type="number" id="${f}-sd-${i}" data-sf="${f}" data-si="${i}" data-sp="d" min="1" max="365" value="${x.d}"><span class="sub">天</span></div>`).join('')+
@@ -612,7 +632,7 @@ function renderProjDrawer(){
        <div class="sub" style="margin-top:6px">點狀態可切換：未開始 → 進行中 → 完成 → 有問題 → 不需要。「不需要」的階段不計入進度與逾期。${mg?'改名稱、日期，新增或移除階段後，按下方「儲存」才會生效。':''}</div></div>
      ${mg?`<div class="box plain"><b>整批調整</b>
        <div class="row"><label class="inline" for="jShift">未完成的階段全部移動</label><input type="number" id="jShift" value="5" min="-130" max="130" style="width:72px"><span>個工作天</span><button class="btn sm" data-act="shiftProj">套用到上方</button></div>
-       <div class="row"><button class="btn sm" data-act="refitProj">依期限重新排程</button><span class="sub">從第一個階段開始日到${ip?'完成期限':'客戶交期'}前 ${BUF} 個工作天（緩衝），依目前各階段工作天數等比例重排，週末不排。</span></div>
+       <div class="row"><button class="btn sm" data-act="refitProj">依期限重新排程</button><span class="sub">從第一個階段開始日到${ip?'完成期限':'客戶交期'}前 ${BUF} 個工作天（緩衝），依目前各階段工作天數等比例重排，週末與國定假日不排。</span></div>
        <label for="jReason" class="vh">調整原因</label><input type="text" id="jReason" value="${esc(D.reason)}" placeholder="調整原因（選填，會留存紀錄）">
        <div class="row"><button class="btn primary" data-act="saveProj">儲存</button><button class="btn" data-act="resetDraft">放棄修改</button></div></div>`
      :p.dropped?'':'<div class="sub">由產品PM、老闆、專案建立者或主責人調整時程。</div>'}
