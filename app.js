@@ -347,7 +347,7 @@ function renderProducts(){
   $('#prodSummary').innerHTML=ps.length?`<div class="stat" style="min-width:200px"><div class="k">今年新品</div><div class="v num">${activeN}<small>款開發中</small></div><div class="s">${dropN?dropN+' 款停止開發':'沒有停止開發的品項'}${lateN?` · <span style="color:var(--danger)">${lateN} 款有階段逾期</span>`:''}</div></div>`:'';
   const mg=isMgr()&&canAct(),ed=canAct();
   let h='';
-  if(!ps.length){h=`<div class="empty">還沒有新品名單。第 2 階段「新品定案名單」完成後，${mg?'在下方輸入品名逐款加入。':'請產品PM 把定案的品項加進來。'}</div>`;}
+  if(!ps.length){h=`<div class="empty">還沒有新品名單。第 2 階段「新品定案名單」完成後，${ed?'在下方輸入品名逐款加入。':'登入並綁定人員名冊後即可加入品項。'}</div>`;}
   else{
     h=`<div class="pscroll"><table class="pm"><thead><tr><th scope="col">品項</th>${cols.map(t=>`<th scope="col">${esc(t.sub.replace(/（.*?）/g,''))}</th>`).join('')}</tr></thead><tbody>`+
     ps.map(p=>{const cells=p.cells||{};const done=cols.filter(t=>cells[t.id]==='done').length;
@@ -355,7 +355,7 @@ function renderProducts(){
       cols.map(t=>{const v=cells[t.id]||'';const sc=pSched(p,t),late=pLate(p,t);return `<td><button class="cell ${v}" data-cell="${p.id}" data-t="${t.id}" ${ed&&!p.dropped?'':'disabled'} aria-label="${esc(p.name)} ${esc(t.sub)}：${CELL_L[v]}">${CELL_L[v]}</button><div class="cd${sc.custom?' custom':''}${late?' late':''}">${esc(mRange(sc.start,sc.end))}${late?' · 逾期':''}</div></td>`;}).join('')+'</tr>';}).join('')+
     '</tbody></table></div>';
   }
-  if(mg)h+=`<div class="addrow"><label for="newProd" class="vh">新品名稱</label><input type="text" id="newProd" placeholder="新品名稱，例如：六角黃銅鋼筆 新色"><button class="btn primary sm" data-act="addProd">加入新品</button></div>`;
+  if(ed)h+=`<div class="addrow"><label for="newProd" class="vh">新品名稱</label><input type="text" id="newProd" placeholder="新品名稱，例如：六角黃銅鋼筆 新色"><button class="btn primary sm" data-act="addProd">加入新品</button></div>`;
   $('#prodWrap').innerHTML=h;
 }
 
@@ -371,7 +371,7 @@ function projRow(P){
 const projTable=list=>list.length?`<table class="pl"><thead><tr><th scope="col">專案</th><th scope="col">類型</th><th scope="col">主責</th><th scope="col">目前階段</th><th scope="col">進度</th><th scope="col">期間</th><th scope="col">狀態</th></tr></thead><tbody>${list.map(projRow).join('')}</tbody></table>`:'<div class="empty" style="margin:12px">沒有符合的專案。</div>';
 function fillLead(sel){if(!sel)return;const mem=memberList();const want=mem.map(m=>m.id).join(',');if(sel.dataset.ids===want)return;const v=sel.value;sel.dataset.ids=want;sel.innerHTML='<option value="">未指定</option>'+mem.map(m=>`<option value="${m.id}">${esc(m.name)}（${esc(m.dept)}）</option>`).join('');sel.value=v;}
 function syncForm(f,ty){
-  const box=$('#'+f+'Form');if(!box)return;box.hidden=!(isMgr()&&canAct());
+  const box=$('#'+f+'Form');if(!box)return;box.hidden=!canAct();
   fillLead($('#'+f+'Lead'));const st=$('#'+f+'Start');if(st&&!st.value)st.value=iso(today());
   box.querySelectorAll('[data-ext]').forEach(el=>el.hidden=ty==='internal');
   const hint=$('#'+f+'Hint');
@@ -402,7 +402,7 @@ function renderType(ty){
   $('#tySummary').innerHTML=`<div class="stat" style="min-width:200px"><div class="k">進行中</div><div class="v num">${open.length}<small>案</small></div><div class="s">${over?`<span style="color:var(--danger)">${over} 案逾期</span>`:'沒有逾期'}</div></div>`;
   $('#tyClosed').checked=S.showClosed;$('#tyLegend').innerHTML=dgLegend();
   const shown=sortProj(list.filter(P=>S.showClosed||!P.closed));
-  $('#tyBanner').innerHTML=list.length?'':`<div class="banner">還沒有${T.l}。${isMgr()&&canAct()?'用下方表單建立，時程會依範本自動排好。':'請產品PM 或老闆建立專案。'}</div>`;
+  $('#tyBanner').innerHTML=list.length?'':`<div class="banner">還沒有${T.l}。${canAct()?'用下方表單建立，時程會依範本自動排好。':'登入並綁定人員名冊後即可建立專案。'}</div>`;
   $('#tyGantt').innerHTML=dateGantt(shown,'專案 / 客戶');
   // stage matrix: columns follow the type template
   const ed=canAct();
@@ -738,7 +738,7 @@ function cycleStage(pid,k){
   x.v=CELL[(CELL.indexOf(x.v||'')+1)%CELL.length];x.by=S.me;x.at=Date.now();updProj(p,{stages:st});
 }
 function createProj(f){
-  if(!isMgr()||!canAct())return;
+  if(!canAct())return;
   const ty=f==='af'?$('#afType').value:S.tab;const name=$('#'+f+'Name').value.trim();
   if(!name){toast('請填寫專案名稱');$('#'+f+'Name').focus();return;}
   const id='p'+Date.now().toString(36);let doc;
