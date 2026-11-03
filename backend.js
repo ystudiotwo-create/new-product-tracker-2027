@@ -52,7 +52,8 @@ const db={
     onSnapshot(cb,onErr){const k=c+'/'+id;(docL[k]||(docL[k]=[])).push(cb);queueMicrotask(()=>cb(dsnap(c,id)));return ()=>{docL[k]=docL[k].filter(x=>x!==cb);};},
     async set(data){applyRow(ok(await sb.from('docs').upsert({collection:c,id,data}).select().single()));},
     async update(patch){applyRow(ok(await sb.rpc('doc_merge',{p_collection:c,p_id:id,p_patch:patch})));},
-    async delete(){ok(await sb.from('docs').delete().match({collection:c,id}));dropRow(c,id);}
+    // row level security turns a forbidden delete into "0 rows", so check something was actually removed
+    async delete(){const r=ok(await sb.from('docs').delete().match({collection:c,id}).select('id'));if(!r.length&&coll(c).has(id))fail({code:'42501',message:'delete not permitted'});dropRow(c,id);}
   };}
 };
 
