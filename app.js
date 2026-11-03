@@ -7,7 +7,7 @@ const LABELS=['產品PM'].concat(DEPTS);
 const WAIT_ON=LABELS.concat(['供應商','外部廠商']);
 const DEF_SET={offsets:[7,3,0],overdueDaily:true,escalateDays:3,ccPM:true,decisionDays:3,weeklyDigest:true};
 const OFFSET_CHOICES=[14,7,3,1,0];
-const CELL=['','active','done','issue'];const CELL_L={'':'未開始',active:'進行中',done:'完成',issue:'有問題'};
+const CELL=['','active','done','issue','skip'];const CELL_L={'':'未開始',active:'進行中',done:'完成',issue:'有問題',skip:'不需要'};
 const ci=t=>t.map(x=>({t:x,done:false,by:null,at:null}));
 const TEMPLATE=[
  {id:'s1',order:1,stage:1,sub:'年度主題、商品類型、售價價格帶；其他計畫：新色、特殊專案',owners:['產品PM','老闆'],start:'2026-06',end:'2026-08',checklist:ci(['確認年度主題','確認商品類型','訂定售價價格帶','規劃新色計畫','規劃特殊專案'])},
@@ -22,15 +22,26 @@ const TEMPLATE=[
  {id:'s7b',order:10,stage:7,sub:'大貨下單（含包裝）',owners:['營管-採購'],start:'2027-06',end:'2027-08',checklist:ci(['大貨下單','包裝下單','生產進度追蹤','到貨驗收'])},
  {id:'s8',order:11,stage:8,sub:'新品上市',owners:['行銷','業務-電商','營管-倉管','業務-國外','業務-顧問'],start:'2027-09',end:'2027-09',checklist:ci(['上架資料與商品照','通路鋪貨','新品上市'])}
 ];
-/* project types: internal runs on the annual stage plan; external / gift projects carry their own dated stages */
+/* project types: internal runs on the annual stage plan; the others carry their own dated stages.
+   project has several kinds, each with its own suggested stages; every stage list can be trimmed or extended per project */
 const PTYPES={
  internal:{l:'內部新品開發',hint:'從市場調查、設計、打樣到量產上市，耗時最長，依年度計畫約 12–16 個月。'},
+ project:{l:'內部專案',hint:'包裝更新、通路陳列、新色改款等，時程比新品開發短。建立時選專案性質會帶入建議階段，用不到的可以取消勾選，名稱與天數都能改。',
+   kinds:{
+    pack:{l:'包裝更新',stages:[['k1','需求確認',5],['k2','包裝設計',14],['k3','內部確認',3],['k4','包裝打樣',10],['k5','印製生產',21],['k6','到貨上架',3]]},
+    display:{l:'通路陳列',stages:[['k1','需求與場地確認',5],['k2','陳列提案',7],['k3','道具設計',7],['k4','道具製作',14],['k5','進場佈置',2],['k6','完成回報',2]]},
+    color:{l:'新色・小改款',stages:[['k1','規格與色彩確認',7],['k2','打樣確認',21],['k3','包裝調整',10],['k4','大貨生產',35],['k5','上市',5]]},
+    promo:{l:'行銷活動',stages:[['k1','活動企劃',7],['k2','素材製作',10],['k3','上線執行',14],['k4','成效檢討',3]]},
+    custom:{l:'其他（自訂）',stages:[['k1','規劃',5],['k2','執行',14],['k3','完成確認',2]]}
+   }},
  external:{l:'外部設計案',hint:'目標明確的中長期設計案，預設約 4–5 個月。填客戶交期時，各階段會依比例排進交期內。',
    stages:[['e1','需求訪談與簽約',10],['e2','概念提案',21],['e3','設計發展',28],['e4','打樣與測試',28],['e5','修正定稿',14],['e6','量產與交付',35]]},
  gift:{l:'企禮客製案',hint:'時程短，視客戶需求而定，預設約 6 週。建議填客戶交期，系統會從交期倒推各階段。',
    stages:[['g1','需求確認與報價',3],['g2','設計提案',5],['g3','客戶確認',3],['g4','打樣確認',7],['g5','生產製作',21],['g6','包裝出貨',3]]}
 };
-const TYPE_KEYS=['internal','external','gift'];
+const TYPE_KEYS=['internal','project','external','gift'];
+const DATED_TABS=['project','external','gift'];
+const TAB_KEYS=['all','internal'].concat(DATED_TABS);
 const LAUNCH=new Date(2027,8,1);
 const BASE_Y=2026,BASE_M=6,NM=16;
 
@@ -38,7 +49,8 @@ const BASE_Y=2026,BASE_M=6,NM=16;
 const clone=o=>JSON.parse(JSON.stringify(o));
 const S={tasks:clone(TEMPLATE),notes:[],files:[],products:[],people:{},claims:{},settings:null,logs:[],mode:'loading',
   db:null,user:null,assets:null,me:null,isOwner:false,isAdmin:false,canWrite:null,names:{},
-  view:'mine',filter:'',gProd:'',open:null,openProd:null,openProj:null,tab:'all',allType:'',showClosed:false,composeKind:'comment',drafts:{},form:null,editDates:false,setDraft:null};
+  view:'mine',filter:'',gProd:'',open:null,openProd:null,openProj:null,tab:'all',allType:'',showClosed:false,composeKind:'comment',drafts:{},form:null,editDates:false,setDraft:null,
+  stDraft:{},pDraft:null};
 try{const v=localStorage.getItem('np-view');if(v)S.view=v;}catch(e){}
 
 /* ---------- helpers ---------- */
@@ -93,6 +105,14 @@ const matchL=(p,l)=>!!p&&(l==='全公司'||p.dept===l||(l==='產品PM'&&!!p.pm))
 const isBoss=()=>myDept()==='老闆';
 const isMgr=()=>isBoss()||!!myM()?.pm||S.isOwner;
 const canAct=()=>live()&&S.canWrite!==false&&(!!myM()||S.isOwner);
+// a dated project's schedule can be changed by managers, whoever created it, and its lead
+const canEditProj=p=>canAct()&&(isMgr()||(!!S.me&&p.by===S.me)||(!!p.lead&&p.lead===S.claims[S.me]));
+// copy what is typed in the open project drawer back into its draft
+function pullDraft(){
+  const D=S.pDraft;if(!D)return;const v=id=>{const el=document.getElementById(id);return el?el.value:null;};
+  D.stages.forEach(x=>{const n=v('jn-'+x.k),a=v('js-'+x.k),z=v('je-'+x.k);if(n!==null)x.n=n;if(a!==null)x.start=a;if(z!==null)x.end=z;});
+  const c=v('jClient'),d=v('jDue'),r=v('jReason');if(c!==null)D.client=c;if(d!==null)D.due=d;if(r!==null)D.reason=r;
+}
 const sorted=()=>S.tasks.slice().sort((a,b)=>a.order-b.order);
 const memberList=()=>Object.entries(S.people).map(([id,m])=>({id,...m})).sort((a,b)=>(a.order||0)-(b.order||0));
 const pname=id=>S.people[id]?.name||'未指定';
@@ -109,18 +129,22 @@ const internalProds=()=>S.products.filter(isInternal);
 const typedProjs=ty=>S.products.filter(p=>pType(p)===ty);
 const typeBadge=ty=>`<span class="tb tb-${ty}">${esc(PTYPES[ty].l)}</span>`;
 function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
-// spread a type's template stages from start; with a due date, scale them to end exactly on it
-function genStages(ty,start,due){
-  const tpl=PTYPES[ty].stages,total=tpl.reduce((a,x)=>a+x[2],0);
+const tplOf=(ty,kind)=>{const T=PTYPES[ty];return T.kinds?(T.kinds[kind]||Object.values(T.kinds)[0]).stages:T.stages;};
+const kindL=p=>PTYPES[pType(p)].kinds?.[p.kind]?.l||'';
+const fmtDur=d=>d<21?d+' 天':'約 '+Math.round(d/7)+' 週';
+// spread stages [[k,name,days]] from start; with a due date, scale them to end exactly on it
+function fitStages(tpl,start,due){
+  const total=tpl.reduce((a,x)=>a+x[2],0);
   const avail=due?days(start,due)+1:total;let prev=0,cum=0;
   return tpl.map(([k,n,d],i)=>{cum+=d;let b=Math.round(cum/total*avail);b=Math.max(b,prev+1);b=Math.min(b,avail-(tpl.length-1-i));
     const st={k,n,start:iso(addDays(start,prev)),end:iso(addDays(start,b-1)),v:''};prev=b;return st;});
 }
-const tplDays=ty=>PTYPES[ty].stages.reduce((a,x)=>a+x[2],0);
+// stages marked 不需要 drop out of progress, timelines and lateness
 function normProj(p){
   let st;
   if(isInternal(p)){const c=p.cells||{};st=prodCols().map(t=>({k:t.id,n:t.sub,s:pStart(p,t),e:pEnd(p,t),v:c[t.id]||''}));}
   else st=(p.stages||[]).map(x=>({k:x.k,n:x.n,s:pd(x.start),e:pd(x.end),v:x.v||''}));
+  st=st.filter(x=>x.v!=='skip');
   const td=today();st.forEach(x=>x.late=!p.dropped&&x.v!=='done'&&td>x.e);
   const done=st.filter(x=>x.v==='done').length;
   const start=st.length?new Date(Math.min(...st.map(x=>x.s))):td,end=st.length?new Date(Math.max(...st.map(x=>x.e))):td;
@@ -169,7 +193,7 @@ const prodCols=()=>sorted().filter(t=>t.stage>=3);
 function pSched(p,t){const s=p.sched&&p.sched[t.id];return s&&s.start&&s.end?{start:s.start,end:s.end,custom:true}:{start:t.start,end:t.end,custom:false};}
 const pStart=(p,t)=>som(pSched(p,t).start);
 const pEnd=(p,t)=>{const s=pSched(p,t);return s.custom?eom(s.end):tEnd(t);};
-const pLate=(p,t)=>!p.dropped&&(p.cells||{})[t.id]!=='done'&&today()>pEnd(p,t);
+const pLate=(p,t)=>{const v=(p.cells||{})[t.id];return !p.dropped&&v!=='done'&&v!=='skip'&&today()>pEnd(p,t);};
 function mRange(a,b){const A=ym(a),B=ym(b);if(a===b)return A.y+'/'+A.m;return A.y===B.y?`${A.y}/${A.m}–${B.m}`:`${A.y}/${A.m}–${B.y}/${B.m}`;}
 function addMonths(s,n){const {y,m}=ym(s);const d=new Date(y,m-1+n,1);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');}
 
@@ -350,8 +374,8 @@ function renderProducts(){
   if(!ps.length){h=`<div class="empty">還沒有新品名單。第 2 階段「新品定案名單」完成後，${ed?'在下方輸入品名逐款加入。':'登入並綁定人員名冊後即可加入品項。'}</div>`;}
   else{
     h=`<div class="pscroll"><table class="pm"><thead><tr><th scope="col">品項</th>${cols.map(t=>`<th scope="col">${esc(t.sub.replace(/（.*?）/g,''))}</th>`).join('')}</tr></thead><tbody>`+
-    ps.map(p=>{const cells=p.cells||{};const done=cols.filter(t=>cells[t.id]==='done').length;
-      return `<tr class="${p.dropped?'dropped':''}"><td><button class="linkbtn" data-prod="${p.id}" aria-label="${esc(p.name)} 時程">${esc(p.name)}</button><div class="sub">${p.dropped?'停止開發':`完成 ${done}/${cols.length}`}${mg?` · <button class="linkbtn sub" style="font-weight:500" data-drop="${p.id}">${p.dropped?'恢復開發':'停止開發'}</button>`:''}</div></td>`+
+    ps.map(p=>{const cells=p.cells||{};const done=cols.filter(t=>cells[t.id]==='done').length,need=cols.filter(t=>cells[t.id]!=='skip').length;
+      return `<tr class="${p.dropped?'dropped':''}"><td><button class="linkbtn" data-prod="${p.id}" aria-label="${esc(p.name)} 時程">${esc(p.name)}</button><div class="sub">${p.dropped?'停止開發':`完成 ${done}/${need}`}${mg?` · <button class="linkbtn sub" style="font-weight:500" data-drop="${p.id}">${p.dropped?'恢復開發':'停止開發'}</button>`:''}</div></td>`+
       cols.map(t=>{const v=cells[t.id]||'';const sc=pSched(p,t),late=pLate(p,t);return `<td><button class="cell ${v}" data-cell="${p.id}" data-t="${t.id}" ${ed&&!p.dropped?'':'disabled'} aria-label="${esc(p.name)} ${esc(t.sub)}：${CELL_L[v]}">${CELL_L[v]}</button><div class="cd${sc.custom?' custom':''}${late?' late':''}">${esc(mRange(sc.start,sc.end))}${late?' · 逾期':''}</div></td>`;}).join('')+'</tr>';}).join('')+
     '</tbody></table></div>';
   }
@@ -374,10 +398,31 @@ function syncForm(f,ty){
   const box=$('#'+f+'Form');if(!box)return;box.hidden=!canAct();
   fillLead($('#'+f+'Lead'));const st=$('#'+f+'Start');if(st&&!st.value)st.value=iso(today());
   box.querySelectorAll('[data-ext]').forEach(el=>el.hidden=ty==='internal');
+  const T=PTYPES[ty],ks=$('#'+f+'Kind');
+  if(ks){ks.closest('label').hidden=!T.kinds;if(T.kinds&&!ks.options.length)ks.innerHTML=Object.entries(T.kinds).map(([k,x])=>`<option value="${k}">${esc(x.l)}</option>`).join('');}
+  const lab=(id,txt)=>{const l=$('#'+f+id)?.closest('label');if(l)l.firstChild.textContent=txt;};
+  lab('Client',ty==='project'?'通路／對象（選填）':'客戶');lab('Due',ty==='project'?'完成期限（選填）':'客戶交期（選填）');
   const hint=$('#'+f+'Hint');
-  if(ty==='internal')hint.textContent='內部新品會加入「內部新品開發」分頁，沿用年度階段時程，之後可在產品表個別調整。';
-  else{const s0=st.value?pd(st.value):today(),du=$('#'+f+'Due').value;const end=du?pd(du):addDays(s0,tplDays(ty)-1);
-    hint.textContent=`${PTYPES[ty].l}：${PTYPES[ty].stages.map(x=>x[1]).join(' → ')}。${du?'依交期排程':'未填交期，依範本約 '+Math.round(tplDays(ty)/7)+' 週'}，預計 ${ymd(end)} 完成。`;}
+  if(ty==='internal'){hint.textContent='內部新品會加入「內部新品開發」分頁，沿用年度階段時程，之後可在產品表個別調整，用不到的階段可設為「不需要」。';return;}
+  const key=ty+'/'+(T.kinds?ks.value:'');let D=S.stDraft[f];
+  if(!D||D.key!==key){D=S.stDraft[f]={key,list:tplOf(ty,T.kinds?ks.value:'').map(([k,n,d])=>({k,n,d,on:true}))};drawStages(f);}
+  const on=D.list.filter(x=>x.on),tot=on.reduce((a,x)=>a+x.d,0);
+  const s0=st.value?pd(st.value):today(),du=$('#'+f+'Due').value;const end=du?pd(du):addDays(s0,Math.max(tot,1)-1);
+  hint.textContent=on.length?`${on.length} 個階段：${on.map(x=>x.n).join(' → ')}。${du?'依期限等比例排程':'未填期限，預估 '+fmtDur(tot)}，預計 ${ymd(end)} 完成。`:'請至少勾選一個階段。';
+}
+// editable stage list in the create form: untick what this project skips, rename, change days, add more
+function drawStages(f){
+  const el=$('#'+f+'Stages'),D=S.stDraft[f];if(!el||!D)return;
+  el.innerHTML='<div class="sub">階段：取消勾選代表這個專案不需要；天數是預估工作天數，可以改。</div>'+D.list.map((x,i)=>`<div class="stg-row">
+    <input type="checkbox" id="${f}-so-${i}" data-sf="${f}" data-si="${i}" data-sp="on" ${x.on?'checked':''} aria-label="包含 ${esc(x.n)}">
+    <label for="${f}-sn-${i}" class="vh">階段名稱</label><input type="text" id="${f}-sn-${i}" data-sf="${f}" data-si="${i}" data-sp="n" value="${esc(x.n)}">
+    <label for="${f}-sd-${i}" class="vh">${esc(x.n)} 天數</label><input type="number" id="${f}-sd-${i}" data-sf="${f}" data-si="${i}" data-sp="d" min="1" max="365" value="${x.d}"><span class="sub">天</span></div>`).join('')+
+    `<button class="btn sm" data-act="addFormStage" data-f="${f}" style="justify-self:start">＋ 新增階段</button>`;
+}
+function setFormStage(el){
+  const f=el.dataset.sf,D=S.stDraft[f],x=D&&D.list[+el.dataset.si];if(!x)return;const k=el.dataset.sp;
+  if(k==='on')x.on=el.checked;else if(k==='d'){x.d=Math.min(365,Math.max(1,Math.round(+el.value||1)));if(el.type==='number'&&document.activeElement!==el)el.value=x.d;}else x.n=el.value;
+  syncForm(f,f==='af'?$('#afType').value:S.tab);
 }
 function renderAll(){
   const list=allProjects();const open=list.filter(P=>!P.closed);
@@ -395,7 +440,7 @@ function renderAll(){
 }
 function renderType(ty){
   const T=PTYPES[ty];
-  $('#tyEyebrow').textContent=T.l;$('#tyTitle').textContent=ty==='external'?'外部設計案時程':'企禮客製案時程';
+  $('#tyEyebrow').textContent=T.l;$('#tyTitle').textContent=T.l+'時程';
   $('#tyDesc').textContent=T.hint+' 點專案名稱可調整各階段日期、切換狀態與留言。';
   const list=typedProjs(ty).map(normProj);const open=list.filter(P=>!P.closed);
   const over=open.filter(P=>P.state.k==='over').length;
@@ -404,13 +449,13 @@ function renderType(ty){
   const shown=sortProj(list.filter(P=>S.showClosed||!P.closed));
   $('#tyBanner').innerHTML=list.length?'':`<div class="banner">還沒有${T.l}。${canAct()?'用下方表單建立，時程會依範本自動排好。':'登入並綁定人員名冊後即可建立專案。'}</div>`;
   $('#tyGantt').innerHTML=dateGantt(shown,'專案 / 客戶');
-  // stage matrix: columns follow the type template
+  // stage list per project: each project keeps its own stages, so they flow in a row instead of fixed columns
   const ed=canAct();
-  $('#tyList').innerHTML=shown.length?`<table class="pm"><thead><tr><th scope="col">專案</th>${T.stages.map(x=>`<th scope="col">${esc(x[1])}</th>`).join('')}<th scope="col">狀態</th></tr></thead><tbody>`+shown.map(P=>{const p=P.p;
-    return `<tr class="${p.dropped?'dropped':''}"><td><button class="linkbtn" data-proj="${esc(p.id)}">${esc(p.name)}</button><div class="sub">${esc(p.client||'')}${p.client?' · ':''}主責 ${esc(p.lead?pname(p.lead):'未指定')}${p.due?' · 交期 '+md(pd(p.due)):''}</div></td>`+
-      T.stages.map(([k])=>{const x=P.stages.find(y=>y.k===k);if(!x)return '<td>—</td>';
-        return `<td><button class="cell ${x.v}" data-pcell="${esc(p.id)}" data-k="${k}" ${ed&&!p.dropped?'':'disabled'} aria-label="${esc(p.name)} ${esc(x.n)}：${CELL_L[x.v]}">${CELL_L[x.v]}</button><div class="cd${x.late?' late':''}">${md(x.s)}–${md(x.e)}${x.late?' · 逾期':''}</div></td>`;}).join('')+
-      `<td>${pill(P.state)}</td></tr>`;}).join('')+'</tbody></table>':'';
+  $('#tyList').innerHTML=shown.length?`<table class="pm"><thead><tr><th scope="col">專案</th><th scope="col" style="text-align:left">階段（點擊切換狀態：未開始 → 進行中 → 完成 → 有問題 → 不需要）</th><th scope="col">狀態</th></tr></thead><tbody>`+shown.map(P=>{const p=P.p,kl=kindL(p);
+    return `<tr class="${p.dropped?'dropped':''}"><td><button class="linkbtn" data-proj="${esc(p.id)}">${esc(p.name)}</button><div class="sub">${kl?esc(kl)+' · ':''}${esc(p.client||'')}${p.client?' · ':''}主責 ${esc(p.lead?pname(p.lead):'未指定')}${p.due?' · 期限 '+md(pd(p.due)):''}</div></td>
+      <td style="text-align:left"><div class="stg-flow">${(p.stages||[]).map(x=>{const v=x.v||'',N=P.stages.find(y=>y.k===x.k),late=!!N&&N.late;
+        return `<div><button class="cell ${v}" data-pcell="${esc(p.id)}" data-k="${esc(x.k)}" ${ed&&!p.dropped?'':'disabled'} aria-label="${esc(p.name)} ${esc(x.n)}：${CELL_L[v]}">${esc(x.n)}</button><div class="cd${late?' late':''}">${CELL_L[v]}${v==='skip'?'':' · '+md(pd(x.start))+'–'+md(pd(x.end))}${late?' · 逾期':''}</div></div>`;}).join('')}</div></td>
+      <td>${pill(P.state)}</td></tr>`;}).join('')+'</tbody></table>':'';
   $('#tyList').hidden=!shown.length;
   syncForm('tf',ty);
 }
@@ -419,12 +464,12 @@ function renderTabs(){
   document.querySelectorAll('.tab').forEach(b=>{const k=b.dataset.tab;b.setAttribute('aria-selected',String(k===S.tab));b.tabIndex=k===S.tab?0:-1;
     const c=k==='all'?'':n(k);b.innerHTML=esc(k==='all'?'全部專案':PTYPES[k].l)+(c?`<span class="num">${c}</span>`:'');});
   $('#pane-all').hidden=S.tab!=='all';$('#pane-internal').hidden=S.tab!=='internal';
-  const tyOn=S.tab==='external'||S.tab==='gift';$('#pane-type').hidden=!tyOn;if(tyOn)$('#pane-type').setAttribute('aria-labelledby','tab-'+S.tab);
+  const tyOn=DATED_TABS.includes(S.tab);$('#pane-type').hidden=!tyOn;if(tyOn)$('#pane-type').setAttribute('aria-labelledby','tab-'+S.tab);
   $('#secNav').hidden=S.tab!=='internal';
   if(S.tab==='all')renderAll();else if(tyOn)renderType(S.tab);
 }
 function setTab(t,scroll){
-  if(!['all','internal','external','gift'].includes(t))t='all';
+  if(!TAB_KEYS.includes(t))t='all';
   S.tab=t;try{localStorage.setItem('np-tab',t);}catch(e){}
   const h='#'+(t==='internal'?'overview':t);if(location.hash!==h)history.replaceState(null,'',h);
   renderTabs();if(scroll)scrollTo({top:0});onScroll();
@@ -511,36 +556,42 @@ function renderProdDrawer(){
 function renderProjDrawer(){
   const p=S.products.find(x=>x.id===S.openProj);const dw=$('#dw');
   if(!p){dw.innerHTML='';return;}
-  const P=normProj(p),a=canAct(),mg=isMgr()&&a&&!p.dropped,mem=memberList();
+  const P=normProj(p),a=canAct(),mg=canEditProj(p)&&!p.dropped,mem=memberList(),ip=pType(p)==='project';
   const notes=S.notes.filter(n=>n.taskId===p.id).sort((x,y)=>x.at-y.at);
-  const rows=(p.stages||[]).map((x,i)=>{const N=P.stages[i];
-    return `<tr><th scope="row">${esc(x.n)}</th>
-      <td><button class="cell ${x.v||''}" data-pcell="${esc(p.id)}" data-k="${x.k}" ${a&&!p.dropped?'':'disabled'} style="width:auto">${CELL_L[x.v||'']}</button>${N.late?' <span class="pill p-over">逾期</span>':''}</td>
-      ${mg?`<td><input type="date" id="js-${x.k}" value="${x.start}" aria-label="${esc(x.n)} 開始"></td><td><input type="date" id="je-${x.k}" value="${x.end}" aria-label="${esc(x.n)} 結束"></td>`
-      :`<td class="num">${ymd(N.s)} – ${ymd(N.e)}</td>`}</tr>`;}).join('');
+  // editors work on a draft so stages can be added, removed and renamed before saving
+  if(mg){if(S.pDraft&&S.pDraft.id===p.id){if(S.pDraft.fresh)delete S.pDraft.fresh;else pullDraft();}else S.pDraft={id:p.id,stages:clone(p.stages||[]),client:p.client||'',due:p.due||'',reason:''};}
+  const D=mg?S.pDraft:null;
+  const rows=(mg?D.stages:p.stages||[]).map(x=>{const real=(p.stages||[]).find(y=>y.k===x.k),v=real?real.v||'':'',N=P.stages.find(y=>y.k===x.k),late=!!N&&N.late;
+    const cell=real?`<button class="cell ${v}" data-pcell="${esc(p.id)}" data-k="${esc(x.k)}" ${a&&!p.dropped?'':'disabled'} style="width:auto">${CELL_L[v]}</button>${late?' <span class="pill p-over">逾期</span>':''}`:'<span class="sub">儲存後生效</span>';
+    return mg?`<tr><td><label for="jn-${esc(x.k)}" class="vh">階段名稱</label><input type="text" id="jn-${esc(x.k)}" value="${esc(x.n)}" style="padding:6px 8px"></td><td>${cell}</td>
+      <td><input type="date" id="js-${esc(x.k)}" value="${esc(x.start)}" aria-label="${esc(x.n)} 開始"></td><td><input type="date" id="je-${esc(x.k)}" value="${esc(x.end)}" aria-label="${esc(x.n)} 結束"></td>
+      <td><button class="btn sm" data-rmst="${esc(x.k)}" aria-label="移除 ${esc(x.n)}" title="移除這個階段">×</button></td></tr>`
+     :`<tr><th scope="row">${esc(x.n)}</th><td>${cell}</td><td class="num">${v==='skip'?'—':ymd(pd(x.start))+' – '+ymd(pd(x.end))}</td></tr>`;}).join('');
   dw.innerHTML=`
    <div class="dw-head">
      <button class="x" data-act="close" aria-label="關閉">×</button>
-     <div class="eyebrow">${esc(PTYPES[pType(p)].l)}</div>
+     <div class="eyebrow">${esc(PTYPES[pType(p)].l)}${kindL(p)?' · '+esc(kindL(p)):''}</div>
      <h3 id="dwTitle">${esc(p.name)}</h3>
      <div class="row">${pill(P.state)}<span class="sub num">${P.done}/${P.total} 階段完成</span></div>
      <div class="bar"><i style="width:${P.total?Math.round(P.done/P.total*100):0}%"></i></div>
    </div>
    <div class="dw-body">
      <dl class="kv">
-       <dt>客戶</dt><dd>${mg?`<input type="text" id="jClient" value="${esc(p.client||'')}" aria-label="客戶">`:esc(p.client||'—')}</dd>
+       <dt>${ip?'通路／對象':'客戶'}</dt><dd>${mg?`<input type="text" id="jClient" value="${esc(D.client)}" aria-label="${ip?'通路／對象':'客戶'}">`:esc(p.client||'—')}</dd>
        <dt>主責人</dt><dd>${mg?`<select id="jLead" data-plead="${esc(p.id)}" aria-label="主責人"><option value="">未指定</option>${mem.map(m=>`<option value="${m.id}" ${m.id===p.lead?'selected':''}>${esc(m.name)}（${esc(m.dept)}）</option>`).join('')}</select>`:esc(p.lead?pname(p.lead):'未指定')}</dd>
-       <dt>客戶交期</dt><dd>${mg?`<input type="date" id="jDue" value="${p.due||''}" aria-label="客戶交期">`:p.due?ymd(pd(p.due)):'未設定'}</dd>
-       <dt>目前時程</dt><dd class="num">${ymd(P.start)} – ${ymd(P.end)}${p.due&&P.end>pd(p.due)?' <span class="pill p-over">超過交期 '+days(pd(p.due),P.end)+' 天</span>':''}</dd>
+       <dt>${ip?'完成期限':'客戶交期'}</dt><dd>${mg?`<input type="date" id="jDue" value="${esc(D.due)}" aria-label="${ip?'完成期限':'客戶交期'}">`:p.due?ymd(pd(p.due)):'未設定'}</dd>
+       <dt>目前時程</dt><dd class="num">${ymd(P.start)} – ${ymd(P.end)}${p.due&&P.end>pd(p.due)?' <span class="pill p-over">超過期限 '+days(pd(p.due),P.end)+' 天</span>':''}</dd>
      </dl>
-     <div class="blk"><h4>階段時程</h4>
-       <table class="ptab"><thead><tr><th scope="col">階段</th><th scope="col">狀態（點擊切換）</th>${mg?'<th scope="col">開始</th><th scope="col">結束</th>':'<th scope="col">時程</th>'}</tr></thead><tbody>${rows}</tbody></table></div>
+     <div class="blk"><h4>階段時程${mg?'<button class="btn sm" data-act="addStage">＋ 新增階段</button>':''}</h4>
+       <table class="ptab"><thead><tr><th scope="col">階段</th><th scope="col">狀態</th>${mg?'<th scope="col">開始</th><th scope="col">結束</th><th scope="col"><span class="vh">移除</span></th>':'<th scope="col">時程</th>'}</tr></thead><tbody>${rows}</tbody></table>
+       <div class="sub" style="margin-top:6px">點狀態可切換：未開始 → 進行中 → 完成 → 有問題 → 不需要。「不需要」的階段不計入進度與逾期。${mg?'改名稱、日期，新增或移除階段後，按下方「儲存」才會生效。':''}</div></div>
      ${mg?`<div class="box plain"><b>整批調整</b>
        <div class="row"><label class="inline" for="jShift">未完成的階段全部移動</label><input type="number" id="jShift" value="7" min="-180" max="180" style="width:72px"><span>天</span><button class="btn sm" data-act="shiftProj">套用到上方</button></div>
-       <div class="row"><button class="btn sm" data-act="refitProj">依交期重新排程</button><span class="sub">從開始日到客戶交期，依範本比例重排所有階段。</span></div>
-       <label for="jReason" class="vh">調整原因</label><input type="text" id="jReason" placeholder="調整原因（選填，會留存紀錄）">
-       <div class="row"><button class="btn primary" data-act="saveProj">儲存</button></div></div>`:''}
-     ${isMgr()&&a?`<div class="row"><button class="btn sm" data-act="dropProj">${p.dropped?'恢復此專案':'停止此專案'}</button></div>`:''}
+       <div class="row"><button class="btn sm" data-act="refitProj">依期限重新排程</button><span class="sub">從第一個階段開始日到${ip?'完成期限':'客戶交期'}，依目前各階段長度等比例重排。</span></div>
+       <label for="jReason" class="vh">調整原因</label><input type="text" id="jReason" value="${esc(D.reason)}" placeholder="調整原因（選填，會留存紀錄）">
+       <div class="row"><button class="btn primary" data-act="saveProj">儲存</button><button class="btn" data-act="resetDraft">放棄修改</button></div></div>`
+     :p.dropped?'':'<div class="sub">由產品PM、老闆、專案建立者或主責人調整時程。</div>'}
+     ${canEditProj(p)?`<div class="row"><button class="btn sm" data-act="dropProj">${p.dropped?'恢復此專案':'停止此專案'}</button></div>`:''}
      <div class="blk"><h4>討論與紀錄</h4>
        <div class="notes">${notes.map(noteHtml).join('')||'<div class="empty">還沒有留言。</div>'}</div>
        ${a?`<div class="compose" style="margin-top:12px"><label for="noteIn" class="vh">內容</label><textarea id="noteIn" rows="3" placeholder="留言給同事，例如客戶回覆、規格變更…">${esc(S.drafts[p.id]||'')}</textarea><button class="btn primary sm" data-act="postProj" style="justify-self:end">送出留言</button></div>`:''}
@@ -641,8 +692,9 @@ document.addEventListener('change',e=>{
   else if(el.id==='fDept'){S.filter=el.value;renderGantt();}
   else if(el.id==='fProd'){S.gProd=el.value;renderGantt();}
   else if(el.id==='allClosed'||el.id==='tyClosed'){S.showClosed=el.checked;renderTabs();}
-  else if(['afType','afStart','afDue'].includes(el.id))syncForm('af',$('#afType').value);
-  else if(['tfStart','tfDue'].includes(el.id))syncForm('tf',S.tab);
+  else if(el.dataset.sf)setFormStage(el);
+  else if(['afType','afKind','afStart','afDue'].includes(el.id))syncForm('af',$('#afType').value);
+  else if(['tfKind','tfStart','tfDue'].includes(el.id))syncForm('tf',S.tab);
   else if(el.dataset.plead){const p=S.products.find(x=>x.id===el.dataset.plead);const v=el.value||null;updProj(p,{lead:v});addNote(p.id,'system',v?`主責人設為 ${pname(v)}`:'取消主責人');}
   else if(el.id==='fileIn'&&el.files[0])upload(el.files[0]);
   else if(el.dataset.lead!==undefined){const t=S.tasks.find(x=>x.id===el.dataset.lead);const v=el.value||null;patchTask(t,{lead:v});addNote(t.id,'system',v?`主責人設為 ${pname(v)}`:'取消主責人');}
@@ -659,10 +711,13 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('input',e=>{
   if(e.target.id==='noteIn'&&(S.open||S.openProj))S.drafts[S.open||S.openProj]=e.target.value;
+  else if(e.target.dataset.sf&&e.target.dataset.sp!=='on')setFormStage(e.target);
 });
 function updPerson(id,patch){S.people[id]={...S.people[id],...patch};render();queue('pp:'+id,()=>S.db.doc('people/'+id).update(patch));}
 document.addEventListener('click',e=>{
-  const b=e.target.closest('[data-open],[data-prod],[data-proj],[data-tab],[data-tfilter],[data-pcell],[data-view],[data-act],[data-kind],[data-cell],[data-drop],[data-rmp],[data-unbind]');if(!b)return;
+  const b=e.target.closest('[data-open],[data-prod],[data-proj],[data-tab],[data-tfilter],[data-pcell],[data-view],[data-act],[data-kind],[data-cell],[data-drop],[data-rmp],[data-unbind],[data-rmst]');if(!b)return;
+  if(b.dataset.rmst){const D=S.pDraft;if(!D)return;pullDraft();if(D.stages.length<2){toast('至少要保留一個階段；用不到的階段也可以設為「不需要」');return;}
+    D.stages=D.stages.filter(x=>x.k!==b.dataset.rmst);renderDrawer();toast('已移除，按「儲存」後生效');return;}
   if(b.dataset.open){openTask(b.dataset.open);return;}
   if(b.dataset.prod){openProduct(b.dataset.prod);return;}
   if(b.dataset.proj){openProj(b.dataset.proj);return;}
@@ -704,12 +759,19 @@ document.addEventListener('click',e=>{
     case 'resetProd':prodCols().forEach(c=>{const a=$('#ps-'+c.id),z=$('#pe-'+c.id);if(a)a.value=c.start;if(z)z.value=c.end;});toast('已改回年度時程，記得儲存');break;
     case 'saveProd':saveProdSched();break;
     case 'createProj':createProj(b.dataset.f);break;
-    case 'shiftProj':{const p=S.products.find(x=>x.id===S.openProj);const n=Math.round(+$('#jShift').value||0);if(!p||!n)return;
-      p.stages.forEach(x=>{if(x.v==='done')return;const a=$('#js-'+x.k),z=$('#je-'+x.k);if(a&&a.value)a.value=iso(addDays(pd(a.value),n));if(z&&z.value)z.value=iso(addDays(pd(z.value),n));});
-      toast(`未完成階段已${n>0?'往後':'往前'}移 ${Math.abs(n)} 天，記得儲存`);break;}
-    case 'refitProj':{const p=S.products.find(x=>x.id===S.openProj);const du=$('#jDue').value;if(!p)return;if(!du){toast('請先填客戶交期');$('#jDue').focus();return;}
-      const s0=pd($('#js-'+p.stages[0].k).value||p.start);if(days(s0,pd(du))+1<p.stages.length){toast('交期太近，排不下所有階段');return;}
-      genStages(pType(p),s0,pd(du)).forEach(x=>{const a=$('#js-'+x.k),z=$('#je-'+x.k);if(a)a.value=x.start;if(z)z.value=x.end;});toast('已依交期重排，記得儲存');break;}
+    case 'addFormStage':{const f=b.dataset.f,D=S.stDraft[f];if(!D)return;D.list.push({k:'x'+Date.now().toString(36),n:'新階段',d:7,on:true});drawStages(f);syncForm(f,f==='af'?$('#afType').value:S.tab);
+      const el=$('#'+f+'-sn-'+(D.list.length-1));if(el){el.focus();el.select();}break;}
+    case 'addStage':{const D=S.pDraft;if(!D)return;pullDraft();const ends=D.stages.map(x=>x.end).filter(Boolean).sort();const s0=ends.length?addDays(pd(ends[ends.length-1]),1):today();
+      const k='x'+Date.now().toString(36);D.stages.push({k,n:'新階段',start:iso(s0),end:iso(addDays(s0,6)),v:''});renderDrawer();const el=$('#jn-'+k);if(el){el.focus();el.select();}break;}
+    case 'resetDraft':S.pDraft=null;renderDrawer();toast('已放棄未儲存的修改');break;
+    case 'shiftProj':{const D=S.pDraft,p=S.products.find(x=>x.id===S.openProj);const n=Math.round(+$('#jShift').value||0);if(!D||!p||!n)return;pullDraft();
+      D.stages.forEach(x=>{const real=p.stages.find(y=>y.k===x.k);if(real&&(real.v==='done'||real.v==='skip'))return;if(x.start)x.start=iso(addDays(pd(x.start),n));if(x.end)x.end=iso(addDays(pd(x.end),n));});
+      D.fresh=true;renderDrawer();toast(`未完成階段已${n>0?'往後':'往前'}移 ${Math.abs(n)} 天，記得儲存`);break;}
+    case 'refitProj':{const D=S.pDraft;if(!D)return;pullDraft();if(!D.due){toast('請先填期限');$('#jDue').focus();return;}
+      if(D.stages.some(x=>!x.start||!x.end||x.end<x.start)){toast('請先把每個階段的開始與結束日期填好');return;}
+      const s0=pd(D.stages.map(x=>x.start).sort()[0]);if(days(s0,pd(D.due))+1<D.stages.length){toast('期限太近，排不下所有階段');return;}
+      const fit=fitStages(D.stages.map(x=>[x.k,x.n,days(pd(x.start),pd(x.end))+1]),s0,pd(D.due));
+      D.stages.forEach((x,i)=>{x.start=fit[i].start;x.end=fit[i].end;});D.fresh=true;renderDrawer();toast('已依期限重排，記得儲存');break;}
     case 'saveProj':saveProj();break;
     case 'dropProj':{const p=S.products.find(x=>x.id===S.openProj);if(!p)return;const d=!p.dropped;updProj(p,{dropped:d});addNote(p.id,'system',d?'專案停止。':'專案恢復進行。');toast(d?'已停止專案':'已恢復專案');break;}
     case 'postProj':{const v=($('#noteIn').value||'').trim();if(!v)return;addNote(S.openProj,'comment',v);S.drafts[S.openProj]='';renderDrawer();toast('留言已送出');break;}
@@ -720,8 +782,8 @@ document.addEventListener('click',e=>{
 });
 function openTask(id){S.open=id;S.openProd=null;S.openProj=null;S.form=null;S.editDates=false;renderDrawer();const d=$('#drawer');if(!d.open)d.showModal();}
 function openProduct(id){S.openProd=id;S.open=null;S.openProj=null;S.form=null;renderDrawer();const d=$('#drawer');if(!d.open)d.showModal();}
-function openProj(id){S.openProj=id;S.open=null;S.openProd=null;S.form=null;renderDrawer();const d=$('#drawer');if(!d.open)d.showModal();}
-$('#drawer').addEventListener('close',()=>{S.open=null;S.openProd=null;S.openProj=null;S.form=null;S.editDates=false;});
+function openProj(id){S.openProj=id;S.open=null;S.openProd=null;S.form=null;S.pDraft=null;renderDrawer();const d=$('#drawer');if(!d.open)d.showModal();}
+$('#drawer').addEventListener('close',()=>{S.open=null;S.openProd=null;S.openProj=null;S.form=null;S.editDates=false;S.pDraft=null;});
 $('#drawer').addEventListener('click',e=>{if(e.target===e.currentTarget)e.currentTarget.close();});
 document.addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.id==='newProd'){e.preventDefault();addProduct();}});
 addEventListener('np-blob-urls',()=>{if(S.open)renderDrawer();});
@@ -746,10 +808,15 @@ function createProj(f){
   else{
     const sv=$('#'+f+'Start').value,dv=$('#'+f+'Due').value;
     if(!sv){toast('請填開始日');$('#'+f+'Start').focus();return;}
+    const tpl=(S.stDraft[f]?.list||[]).filter(x=>x.on).map(x=>[x.k,x.n.trim(),x.d]);
+    if(!tpl.length){toast('請至少勾選一個階段');return;}
+    if(tpl.some(x=>!x[1])){toast('有階段沒有名稱');return;}
     const s0=pd(sv),due=dv?pd(dv):null;
-    if(due&&days(s0,due)+1<PTYPES[ty].stages.length){toast('交期必須晚於開始日，且至少留 '+PTYPES[ty].stages.length+' 天');$('#'+f+'Due').focus();return;}
+    if(due&&days(s0,due)+1<tpl.length){toast('期限必須晚於開始日，且至少留 '+tpl.length+' 天');$('#'+f+'Due').focus();return;}
     doc={type:ty,name,client:$('#'+f+'Client').value.trim(),lead:$('#'+f+'Lead').value||null,start:sv,due:dv||null,
-      stages:genStages(ty,s0,due),dropped:false,order:Date.now(),by:S.me,at:Date.now()};
+      stages:fitStages(tpl,s0,due),dropped:false,order:Date.now(),by:S.me,at:Date.now()};
+    if(PTYPES[ty].kinds)doc.kind=$('#'+f+'Kind').value;
+    delete S.stDraft[f];
   }
   S.products.push({id,...doc});['Name','Client','Due'].forEach(k=>{const el=$('#'+f+k);if(el)el.value='';});
   render();if(live())queue('p:'+id,()=>S.db.doc('products/'+id).set(doc));
@@ -757,18 +824,28 @@ function createProj(f){
   if(ty==='internal')setTab('internal');else{if(f==='af')setTab(ty);openProj(id);}
 }
 function saveProj(){
-  const p=S.products.find(x=>x.id===S.openProj);if(!p||!isMgr()||!canAct())return;
-  const st=clone(p.stages);
-  for(const x of st){const a=$('#js-'+x.k).value,z=$('#je-'+x.k).value;
-    if(!a||!z){toast(`「${x.n}」的開始與結束日期都要填`);return;}
-    if(z<a){toast(`「${x.n}」結束日不能早於開始日`);$('#je-'+x.k).focus();return;}
-    x.start=a;x.end=z;}
-  const before=`${p.stages[0].start}~${p.stages[p.stages.length-1].end}`,after=`${st[0].start}~${st[st.length-1].end}`;
-  const moved=st.filter((x,i)=>x.start!==p.stages[i].start||x.end!==p.stages[i].end).length;
-  const patch={stages:st,client:$('#jClient').value.trim(),due:$('#jDue').value||null,start:st[0].start};
-  const r=$('#jReason').value.trim();
-  updProj(p,patch);
-  if(moved)addNote(p.id,'system',`時程調整（${moved} 個階段）：${before} → ${after}${r?'。原因：'+r:''}`);
+  const p=S.products.find(x=>x.id===S.openProj);const D=S.pDraft;if(!p||!D||D.id!==p.id||!canEditProj(p))return;
+  pullDraft();
+  for(const x of D.stages){const n=x.n.trim();
+    if(!n){toast('有階段沒有名稱');$('#jn-'+x.k)?.focus();return;}
+    if(!x.start||!x.end){toast(`「${n}」的開始與結束日期都要填`);return;}
+    if(x.end<x.start){toast(`「${n}」結束日不能早於開始日`);$('#je-'+x.k)?.focus();return;}}
+  // keep each stage's status and history; order by start date so the timeline reads left to right
+  const old=p.stages||[];
+  const st=D.stages.map(x=>{const real=old.find(y=>y.k===x.k);return {...(real||{v:''}),k:x.k,n:x.n.trim(),start:x.start,end:x.end};})
+    .sort((a,b)=>a.start.localeCompare(b.start)||a.end.localeCompare(b.end));
+  const span=l=>l.length?`${l.map(x=>x.start).sort()[0]}~${l.map(x=>x.end).sort().pop()}`:'—';
+  const added=st.filter(x=>!old.some(y=>y.k===x.k)).map(x=>x.n),removed=old.filter(y=>!st.some(x=>x.k===y.k)).map(y=>y.n);
+  const renamed=st.filter(x=>{const y=old.find(o=>o.k===x.k);return y&&y.n!==x.n;}).length;
+  const moved=st.filter(x=>{const y=old.find(o=>o.k===x.k);return y&&(y.start!==x.start||y.end!==x.end);}).length;
+  const patch={stages:st,client:D.client.trim(),due:D.due||null,start:st[0].start};
+  const r=D.reason.trim(),log=[];
+  if(moved)log.push(`時程調整 ${moved} 個階段：${span(old)} → ${span(st)}`);
+  if(added.length)log.push('新增階段：'+added.join('、'));
+  if(removed.length)log.push('移除階段：'+removed.join('、'));
+  if(renamed)log.push(`改名 ${renamed} 個階段`);
+  S.pDraft=null;updProj(p,patch);
+  if(log.length)addNote(p.id,'system',log.join('；')+(r?'。原因：'+r:''));
   toast('已儲存');
 }
 function saveProdSched(){
@@ -833,8 +910,8 @@ async function resolveNames(force){
 }
 
 /* ---------- boot ---------- */
-function tabFromHash(){const h=location.hash.slice(1);if(['all','internal','external','gift'].includes(h))return h;if(h&&document.getElementById(h)?.closest('#pane-internal'))return 'internal';return null;}
-{let t=tabFromHash();if(!t)try{t=localStorage.getItem('np-tab');}catch(e){}S.tab=['all','internal','external','gift'].includes(t)?t:'all';}
+function tabFromHash(){const h=location.hash.slice(1);if(TAB_KEYS.includes(h))return h;if(h&&document.getElementById(h)?.closest('#pane-internal'))return 'internal';return null;}
+{let t=tabFromHash();if(!t)try{t=localStorage.getItem('np-tab');}catch(e){}S.tab=TAB_KEYS.includes(t)?t:'all';}
 addEventListener('hashchange',()=>{const t=tabFromHash();if(t&&t!==S.tab)setTab(t);});
 document.getElementById('tabs').addEventListener('keydown',e=>{if(e.key!=='ArrowRight'&&e.key!=='ArrowLeft')return;const ts=[...document.querySelectorAll('.tab')];const i=ts.findIndex(x=>x.dataset.tab===S.tab);const n=ts[(i+(e.key==='ArrowRight'?1:ts.length-1))%ts.length];setTab(n.dataset.tab);n.focus();});
 render();onScroll();
