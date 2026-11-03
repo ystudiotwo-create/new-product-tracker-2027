@@ -26,18 +26,19 @@ const TEMPLATE=[
    project has several kinds, each with its own suggested stages; every stage list can be trimmed or extended per project */
 const PTYPES={
  internal:{l:'內部新品開發',hint:'從市場調查、設計、打樣到量產上市，耗時最長，依年度計畫約 12–16 個月。'},
- project:{l:'內部專案',hint:'包裝更新、通路陳列、新色改款等，時程比新品開發短。建立時選專案性質會帶入建議階段，用不到的可以取消勾選，名稱與天數都能改。',
+ project:{l:'內部專案',hint:'包裝更新、通路陳列、新色改款等，時程比新品開發短。建立時選專案性質會帶入建議階段，用不到的可以取消勾選，名稱與工作天數都能改，完成期限會自動算好（含 3 個工作天緩衝）。',
    kinds:{
-    pack:{l:'包裝更新',stages:[['k1','需求確認',5],['k2','包裝設計',14],['k3','內部確認',3],['k4','包裝打樣',10],['k5','印製生產',21],['k6','到貨上架',3]]},
-    display:{l:'通路陳列',stages:[['k1','需求與場地確認',5],['k2','陳列提案',7],['k3','道具設計',7],['k4','道具製作',14],['k5','進場佈置',2],['k6','完成回報',2]]},
-    color:{l:'新色・小改款',stages:[['k1','規格與色彩確認',7],['k2','打樣確認',21],['k3','包裝調整',10],['k4','大貨生產',35],['k5','上市',5]]},
-    promo:{l:'行銷活動',stages:[['k1','活動企劃',7],['k2','素材製作',10],['k3','上線執行',14],['k4','成效檢討',3]]},
-    custom:{l:'其他（自訂）',stages:[['k1','規劃',5],['k2','執行',14],['k3','完成確認',2]]}
+    pack:{l:'包裝更新',stages:[['k1','需求確認',4],['k2','包裝設計',10],['k3','內部確認',2],['k4','包裝打樣',7],['k5','印製生產',15],['k6','到貨上架',2]]},
+    display:{l:'通路陳列',stages:[['k1','需求與場地確認',4],['k2','陳列提案',5],['k3','道具設計',5],['k4','道具製作',10],['k5','進場佈置',2],['k6','完成回報',2]]},
+    color:{l:'新色・小改款',stages:[['k1','規格與色彩確認',5],['k2','打樣確認',15],['k3','包裝調整',7],['k4','大貨生產',25],['k5','上市',4]]},
+    promo:{l:'行銷活動',stages:[['k1','活動企劃',5],['k2','素材製作',7],['k3','上線執行',10],['k4','成效檢討',2]]},
+    custom:{l:'其他（自訂）',stages:[['k1','規劃',4],['k2','執行',10],['k3','完成確認',2]]}
    }},
- external:{l:'外部設計案',hint:'目標明確的中長期設計案，預設約 4–5 個月。填客戶交期時，各階段會依比例排進交期內。',
-   stages:[['e1','需求訪談與簽約',10],['e2','概念提案',21],['e3','設計發展',28],['e4','打樣與測試',28],['e5','修正定稿',14],['e6','量產與交付',35]]},
- gift:{l:'企禮客製案',hint:'時程短，視客戶需求而定，預設約 6 週。建議填客戶交期，系統會從交期倒推各階段。',
-   stages:[['g1','需求確認與報價',3],['g2','設計提案',5],['g3','客戶確認',3],['g4','打樣確認',7],['g5','生產製作',21],['g6','包裝出貨',3]]}
+ // stage lengths are workdays
+ external:{l:'外部設計案',hint:'目標明確的中長期設計案，預設約 4–5 個月。客戶交期會依階段工作天自動帶入（含 3 個工作天緩衝），也可以自己填，各階段會依比例排進交期內。',
+   stages:[['e1','需求訪談與簽約',7],['e2','概念提案',15],['e3','設計發展',20],['e4','打樣與測試',20],['e5','修正定稿',10],['e6','量產與交付',25]]},
+ gift:{l:'企禮客製案',hint:'時程短，視客戶需求而定，預設約 6 週。客戶交期會依階段工作天自動帶入（含 3 個工作天緩衝）；客戶有指定交期就直接填，系統會從交期倒推各階段。',
+   stages:[['g1','需求確認與報價',2],['g2','設計提案',4],['g3','客戶確認',2],['g4','打樣確認',5],['g5','生產製作',15],['g6','包裝出貨',2]]}
 };
 const TYPE_KEYS=['internal','project','external','gift'];
 const DATED_TABS=['project','external','gift'];
@@ -50,7 +51,7 @@ const clone=o=>JSON.parse(JSON.stringify(o));
 const S={tasks:clone(TEMPLATE),notes:[],files:[],products:[],people:{},claims:{},settings:null,logs:[],mode:'loading',
   db:null,user:null,assets:null,me:null,isOwner:false,isAdmin:false,canWrite:null,names:{},
   view:'mine',filter:'',gProd:'',open:null,openProd:null,openProj:null,tab:'all',allType:'',showClosed:false,composeKind:'comment',drafts:{},form:null,editDates:false,setDraft:null,
-  stDraft:{},pDraft:null};
+  stDraft:{},pDraft:null,dueAuto:{}};
 try{const v=localStorage.getItem('np-view');if(v)S.view=v;}catch(e){}
 
 /* ---------- helpers ---------- */
@@ -134,13 +135,22 @@ const typeBadge=ty=>`<span class="tb tb-${ty}">${esc(PTYPES[ty].l)}</span>`;
 function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
 const tplOf=(ty,kind)=>{const T=PTYPES[ty];return T.kinds?(T.kinds[kind]||Object.values(T.kinds)[0]).stages:T.stages;};
 const kindL=p=>PTYPES[pType(p)].kinds?.[p.kind]?.l||'';
-const fmtDur=d=>d<21?d+' 天':'約 '+Math.round(d/7)+' 週';
-// spread stages [[k,name,days]] from start; with a due date, scale them to end exactly on it
-function fitStages(tpl,start,due){
-  const total=tpl.reduce((a,x)=>a+x[2],0);
-  const avail=due?days(start,due)+1:total;let prev=0,cum=0;
+const fmtDur=d=>d+' 個工作天'+(d>=10?`（約 ${Math.round(d/5)} 週）`:'');
+/* workdays: stage lengths count Monday–Friday only */
+const BUF=3; // workdays of slack between the last stage and the deadline
+const isWork=d=>d.getDay()!==0&&d.getDay()!==6;
+function nextWork(d){let x=new Date(d);while(!isWork(x))x=addDays(x,1);return x;}
+function prevWork(d){let x=new Date(d);while(!isWork(x))x=addDays(x,-1);return x;}
+// move n workdays from d (d is first snapped to a workday in the direction of travel)
+function addWork(d,n){let x=n<0?prevWork(d):nextWork(d);const s=n<0?-1:1;for(let i=Math.abs(n);i>0;){x=addDays(x,s);if(isWork(x))i--;}return x;}
+// workdays from a to b, both included
+function countWork(a,b){let n=0;for(let x=new Date(a);x<=b;x=addDays(x,1))if(isWork(x))n++;return n;}
+// lay stages [[k,name,workdays]] end to end from start; with an end date, scale them to finish exactly on it
+function fitStages(tpl,start,end){
+  const s0=nextWork(start),total=tpl.reduce((a,x)=>a+x[2],0);
+  const avail=end?countWork(s0,end):total;const at=i=>addWork(s0,i);let prev=0,cum=0;
   return tpl.map(([k,n,d],i)=>{cum+=d;let b=Math.round(cum/total*avail);b=Math.max(b,prev+1);b=Math.min(b,avail-(tpl.length-1-i));
-    const st={k,n,start:iso(addDays(start,prev)),end:iso(addDays(start,b-1)),v:''};prev=b;return st;});
+    const st={k,n,start:iso(at(prev)),end:iso(at(b-1)),v:''};prev=b;return st;});
 }
 // stages marked 不需要 drop out of progress, timelines and lateness
 function normProj(p){
@@ -404,19 +414,30 @@ function syncForm(f,ty){
   const T=PTYPES[ty],ks=$('#'+f+'Kind');
   if(ks){ks.closest('label').hidden=!T.kinds;if(T.kinds&&!ks.options.length)ks.innerHTML=Object.entries(T.kinds).map(([k,x])=>`<option value="${k}">${esc(x.l)}</option>`).join('');}
   const lab=(id,txt)=>{const l=$('#'+f+id)?.closest('label');if(l)l.firstChild.textContent=txt;};
-  lab('Client',ty==='project'?'通路／對象（選填）':'客戶');lab('Due',ty==='project'?'完成期限（選填）':'客戶交期（選填）');
+  const dueAuto=S.dueAuto[f]!==false;
+  lab('Client',ty==='project'?'通路／對象（選填）':'客戶');lab('Due',(ty==='project'?'完成期限':'客戶交期')+(dueAuto?'（自動）':'（自訂）'));
   const hint=$('#'+f+'Hint');
   if(ty==='internal'){hint.textContent='內部新品會加入「內部新品開發」分頁，沿用年度階段時程，之後可在產品表個別調整，用不到的階段可設為「不需要」。';return;}
   const key=ty+'/'+(T.kinds?ks.value:'');let D=S.stDraft[f];
   if(!D||D.key!==key){D=S.stDraft[f]={key,list:tplOf(ty,T.kinds?ks.value:'').map(([k,n,d])=>({k,n,d,on:true}))};drawStages(f);}
   const on=D.list.filter(x=>x.on),tot=on.reduce((a,x)=>a+x.d,0);
-  const s0=st.value?pd(st.value):today(),du=$('#'+f+'Due').value;const end=du?pd(du):addDays(s0,Math.max(tot,1)-1);
-  hint.textContent=on.length?`${on.length} 個階段：${on.map(x=>x.n).join(' → ')}。${du?'依期限等比例排程':'未填期限，預估 '+fmtDur(tot)}，預計 ${ymd(end)} 完成。`:'請至少勾選一個階段。';
+  if(!on.length){hint.textContent='請至少勾選一個階段。';return;}
+  const s0=nextWork(st.value?pd(st.value):today()),dueEl=$('#'+f+'Due');
+  const workEnd=addWork(s0,tot-1);
+  // automatic deadline: last stage + buffer; a typed deadline wins until reset
+  if(dueAuto)dueEl.value=iso(addWork(workEnd,BUF));
+  const reset=dueAuto?'':` <button class="linkbtn sub" data-act="dueAuto" data-f="${f}">改回自動計算</button>`;
+  const flow=`${on.length} 個階段：${on.map(x=>esc(x.n)).join(' → ')}。`;
+  if(dueAuto)hint.innerHTML=`${flow}共 ${fmtDur(tot)}，週末不計；${ymd(s0)} 開始、預計 ${ymd(workEnd)} 完成；期限自動設為再加 ${BUF} 個工作天緩衝：<b>${ymd(pd(dueEl.value))}</b>。`;
+  else if(!dueEl.value)hint.innerHTML=`${flow}請填期限，或${reset}`;
+  else{const last=addWork(pd(dueEl.value),-BUF),av=countWork(s0,last);
+    hint.innerHTML=av<on.length?`<span style="color:var(--danger)">期限太近：扣掉 ${BUF} 個工作天緩衝後只剩 ${Math.max(av,0)} 個工作天，排不下 ${on.length} 個階段。</span>${reset}`
+      :`${flow}依你填的期限排程：扣掉 ${BUF} 個工作天緩衝，各階段等比例排進 ${ymd(s0)}–${ymd(last)}（${av} 個工作天，範本需要 ${tot} 個）${av<tot?'，<span style="color:var(--danger)">比範本緊</span>':''}。${reset}`;}
 }
 // editable stage list in the create form: untick what this project skips, rename, change days, add more
 function drawStages(f){
   const el=$('#'+f+'Stages'),D=S.stDraft[f];if(!el||!D)return;
-  el.innerHTML='<div class="sub">階段：取消勾選代表這個專案不需要；天數是預估工作天數，可以改。</div>'+D.list.map((x,i)=>`<div class="stg-row">
+  el.innerHTML='<div class="sub">階段：取消勾選代表這個專案不需要；天數是工作天（週一到週五），可以改。</div>'+D.list.map((x,i)=>`<div class="stg-row">
     <input type="checkbox" id="${f}-so-${i}" data-sf="${f}" data-si="${i}" data-sp="on" ${x.on?'checked':''} aria-label="包含 ${esc(x.n)}">
     <label for="${f}-sn-${i}" class="vh">階段名稱</label><input type="text" id="${f}-sn-${i}" data-sf="${f}" data-si="${i}" data-sp="n" value="${esc(x.n)}">
     <label for="${f}-sd-${i}" class="vh">${esc(x.n)} 天數</label><input type="number" id="${f}-sd-${i}" data-sf="${f}" data-si="${i}" data-sp="d" min="1" max="365" value="${x.d}"><span class="sub">天</span></div>`).join('')+
@@ -590,8 +611,8 @@ function renderProjDrawer(){
        <table class="ptab"><thead><tr><th scope="col">階段</th><th scope="col">狀態</th>${mg?'<th scope="col">開始</th><th scope="col">結束</th><th scope="col"><span class="vh">移除</span></th>':'<th scope="col">時程</th>'}</tr></thead><tbody>${rows}</tbody></table>
        <div class="sub" style="margin-top:6px">點狀態可切換：未開始 → 進行中 → 完成 → 有問題 → 不需要。「不需要」的階段不計入進度與逾期。${mg?'改名稱、日期，新增或移除階段後，按下方「儲存」才會生效。':''}</div></div>
      ${mg?`<div class="box plain"><b>整批調整</b>
-       <div class="row"><label class="inline" for="jShift">未完成的階段全部移動</label><input type="number" id="jShift" value="7" min="-180" max="180" style="width:72px"><span>天</span><button class="btn sm" data-act="shiftProj">套用到上方</button></div>
-       <div class="row"><button class="btn sm" data-act="refitProj">依期限重新排程</button><span class="sub">從第一個階段開始日到${ip?'完成期限':'客戶交期'}，依目前各階段長度等比例重排。</span></div>
+       <div class="row"><label class="inline" for="jShift">未完成的階段全部移動</label><input type="number" id="jShift" value="5" min="-130" max="130" style="width:72px"><span>個工作天</span><button class="btn sm" data-act="shiftProj">套用到上方</button></div>
+       <div class="row"><button class="btn sm" data-act="refitProj">依期限重新排程</button><span class="sub">從第一個階段開始日到${ip?'完成期限':'客戶交期'}前 ${BUF} 個工作天（緩衝），依目前各階段工作天數等比例重排，週末不排。</span></div>
        <label for="jReason" class="vh">調整原因</label><input type="text" id="jReason" value="${esc(D.reason)}" placeholder="調整原因（選填，會留存紀錄）">
        <div class="row"><button class="btn primary" data-act="saveProj">儲存</button><button class="btn" data-act="resetDraft">放棄修改</button></div></div>`
      :p.dropped?'':'<div class="sub">由產品PM、老闆、專案建立者或主責人調整時程。</div>'}
@@ -698,8 +719,9 @@ document.addEventListener('change',e=>{
   else if(el.id==='fProd'){S.gProd=el.value;renderGantt();}
   else if(el.id==='allClosed'||el.id==='tyClosed'){S.showClosed=el.checked;renderTabs();}
   else if(el.dataset.sf)setFormStage(el);
-  else if(['afType','afKind','afStart','afDue'].includes(el.id))syncForm('af',$('#afType').value);
-  else if(['tfKind','tfStart','tfDue'].includes(el.id))syncForm('tf',S.tab);
+  else if(el.id==='afDue'||el.id==='tfDue'){const f=el.id.slice(0,2);S.dueAuto[f]=!el.value;syncForm(f,f==='af'?$('#afType').value:S.tab);}
+  else if(['afType','afKind','afStart'].includes(el.id))syncForm('af',$('#afType').value);
+  else if(['tfKind','tfStart'].includes(el.id))syncForm('tf',S.tab);
   else if(el.dataset.plead){const p=S.products.find(x=>x.id===el.dataset.plead);const v=el.value||null;updProj(p,{lead:v});addNote(p.id,'system',v?`主責人設為 ${pname(v)}`:'取消主責人');}
   else if(el.id==='fileIn'&&el.files[0])upload(el.files[0]);
   else if(el.dataset.lead!==undefined){const t=S.tasks.find(x=>x.id===el.dataset.lead);const v=el.value||null;patchTask(t,{lead:v});addNote(t.id,'system',v?`主責人設為 ${pname(v)}`:'取消主責人');}
@@ -764,19 +786,21 @@ document.addEventListener('click',e=>{
     case 'resetProd':prodCols().forEach(c=>{const a=$('#ps-'+c.id),z=$('#pe-'+c.id);if(a)a.value=c.start;if(z)z.value=c.end;});toast('已改回年度時程，記得儲存');break;
     case 'saveProd':saveProdSched();break;
     case 'createProj':createProj(b.dataset.f);break;
+    case 'dueAuto':{const f=b.dataset.f;S.dueAuto[f]=true;syncForm(f,f==='af'?$('#afType').value:S.tab);break;}
     case 'addFormStage':{const f=b.dataset.f,D=S.stDraft[f];if(!D)return;D.list.push({k:'x'+Date.now().toString(36),n:'新階段',d:7,on:true});drawStages(f);syncForm(f,f==='af'?$('#afType').value:S.tab);
       const el=$('#'+f+'-sn-'+(D.list.length-1));if(el){el.focus();el.select();}break;}
-    case 'addStage':{const D=S.pDraft;if(!D)return;pullDraft();const ends=D.stages.map(x=>x.end).filter(Boolean).sort();const s0=ends.length?addDays(pd(ends[ends.length-1]),1):today();
-      const k='x'+Date.now().toString(36);D.stages.push({k,n:'新階段',start:iso(s0),end:iso(addDays(s0,6)),v:''});renderDrawer();const el=$('#jn-'+k);if(el){el.focus();el.select();}break;}
+    case 'addStage':{const D=S.pDraft;if(!D)return;pullDraft();const ends=D.stages.map(x=>x.end).filter(Boolean).sort();const s0=ends.length?addWork(pd(ends[ends.length-1]),1):nextWork(today());
+      const k='x'+Date.now().toString(36);D.stages.push({k,n:'新階段',start:iso(s0),end:iso(addWork(s0,4)),v:''});D.fresh=true;renderDrawer();const el=$('#jn-'+k);if(el){el.focus();el.select();}break;}
     case 'resetDraft':S.pDraft=null;renderDrawer();toast('已放棄未儲存的修改');break;
     case 'delProj':{if(b.dataset.confirm!=='1'){b.dataset.confirm='1';b.textContent='確定永久刪除？再按一次';return;}delProj(b.dataset.id);break;}
     case 'shiftProj':{const D=S.pDraft,p=S.products.find(x=>x.id===S.openProj);const n=Math.round(+$('#jShift').value||0);if(!D||!p||!n)return;pullDraft();
-      D.stages.forEach(x=>{const real=p.stages.find(y=>y.k===x.k);if(real&&(real.v==='done'||real.v==='skip'))return;if(x.start)x.start=iso(addDays(pd(x.start),n));if(x.end)x.end=iso(addDays(pd(x.end),n));});
-      D.fresh=true;renderDrawer();toast(`未完成階段已${n>0?'往後':'往前'}移 ${Math.abs(n)} 天，記得儲存`);break;}
+      D.stages.forEach(x=>{const real=p.stages.find(y=>y.k===x.k);if(real&&(real.v==='done'||real.v==='skip'))return;if(x.start)x.start=iso(addWork(pd(x.start),n));if(x.end)x.end=iso(addWork(pd(x.end),n));});
+      D.fresh=true;renderDrawer();toast(`未完成階段已${n>0?'往後':'往前'}移 ${Math.abs(n)} 個工作天，記得儲存`);break;}
     case 'refitProj':{const D=S.pDraft;if(!D)return;pullDraft();if(!D.due){toast('請先填期限');$('#jDue').focus();return;}
       if(D.stages.some(x=>!x.start||!x.end||x.end<x.start)){toast('請先把每個階段的開始與結束日期填好');return;}
-      const s0=pd(D.stages.map(x=>x.start).sort()[0]);if(days(s0,pd(D.due))+1<D.stages.length){toast('期限太近，排不下所有階段');return;}
-      const fit=fitStages(D.stages.map(x=>[x.k,x.n,days(pd(x.start),pd(x.end))+1]),s0,pd(D.due));
+      const s0=nextWork(pd(D.stages.map(x=>x.start).sort()[0])),last=addWork(pd(D.due),-BUF);
+      if(countWork(s0,last)<D.stages.length){toast(`期限太近：扣掉 ${BUF} 個工作天緩衝後排不下所有階段`);return;}
+      const fit=fitStages(D.stages.map(x=>[x.k,x.n,Math.max(1,countWork(pd(x.start),pd(x.end)))]),s0,last);
       D.stages.forEach((x,i)=>{x.start=fit[i].start;x.end=fit[i].end;});D.fresh=true;renderDrawer();toast('已依期限重排，記得儲存');break;}
     case 'saveProj':saveProj();break;
     case 'dropProj':{const p=S.products.find(x=>x.id===S.openProj);if(!p)return;const d=!p.dropped;updProj(p,{dropped:d});addNote(p.id,'system',d?'專案停止。':'專案恢復進行。');toast(d?'已停止專案':'已恢復專案');break;}
@@ -817,12 +841,17 @@ function createProj(f){
     const tpl=(S.stDraft[f]?.list||[]).filter(x=>x.on).map(x=>[x.k,x.n.trim(),x.d]);
     if(!tpl.length){toast('請至少勾選一個階段');return;}
     if(tpl.some(x=>!x[1])){toast('有階段沒有名稱');return;}
-    const s0=pd(sv),due=dv?pd(dv):null;
-    if(due&&days(s0,due)+1<tpl.length){toast('期限必須晚於開始日，且至少留 '+tpl.length+' 天');$('#'+f+'Due').focus();return;}
-    doc={type:ty,name,client:$('#'+f+'Client').value.trim(),lead:$('#'+f+'Lead').value||null,start:sv,due:dv||null,
-      stages:fitStages(tpl,s0,due),dropped:false,order:Date.now(),by:S.me,at:Date.now()};
+    // automatic deadline: stages run at their own length; typed deadline: stages squeeze into it, keeping the buffer
+    const s0=nextWork(pd(sv)),auto=S.dueAuto[f]!==false;
+    if(!auto&&!dv){toast('請填期限，或改回自動計算');$('#'+f+'Due').focus();return;}
+    const last=auto?null:addWork(pd(dv),-BUF);
+    if(last&&countWork(s0,last)<tpl.length){toast(`期限太近：扣掉 ${BUF} 個工作天緩衝後排不下 ${tpl.length} 個階段`);$('#'+f+'Due').focus();return;}
+    const stages=fitStages(tpl,s0,last);
+    const due=auto?iso(addWork(pd(stages[stages.length-1].end),BUF)):dv;
+    doc={type:ty,name,client:$('#'+f+'Client').value.trim(),lead:$('#'+f+'Lead').value||null,start:stages[0].start,due,
+      stages,dropped:false,order:Date.now(),by:S.me,at:Date.now()};
     if(PTYPES[ty].kinds)doc.kind=$('#'+f+'Kind').value;
-    delete S.stDraft[f];
+    delete S.stDraft[f];S.dueAuto[f]=true;
   }
   S.products.push({id,...doc});['Name','Client','Due'].forEach(k=>{const el=$('#'+f+k);if(el)el.value='';});
   render();if(live())queue('p:'+id,()=>S.db.doc('products/'+id).set(doc));
