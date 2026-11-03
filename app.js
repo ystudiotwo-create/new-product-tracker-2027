@@ -107,6 +107,9 @@ const isMgr=()=>isBoss()||!!myM()?.pm||S.isOwner;
 const canAct=()=>live()&&S.canWrite!==false&&(!!myM()||S.isOwner);
 // a dated project's schedule can be changed by managers, whoever created it, and its lead
 const canEditProj=p=>canAct()&&(isMgr()||(!!S.me&&p.by===S.me)||(!!p.lead&&p.lead===S.claims[S.me]));
+// deleting is permanent, so only managers and the creator may do it
+const canDelProj=p=>canAct()&&(isMgr()||(!!S.me&&p.by===S.me));
+const delBtn=p=>canDelProj(p)?`<div class="box plain"><b>刪除</b><div class="sub">刪除後無法復原，所有成員都看不到這個${isInternal(p)?'品項':'專案'}。只是暫停或取消的話，建議用「停止」保留紀錄。</div><button class="btn sm danger" data-act="delProj" data-id="${esc(p.id)}">刪除${isInternal(p)?'此品項':'此專案'}</button></div>`:'';
 // copy what is typed in the open project drawer back into its draft
 function pullDraft(){
   const D=S.pDraft;if(!D)return;const v=id=>{const el=document.getElementById(id);return el?el.value:null;};
@@ -551,6 +554,7 @@ function renderProdDrawer(){
      <div class="row"><button class="btn primary" data-act="saveProd">儲存時程</button><button class="btn" data-act="close">取消</button></div>`
      :p.dropped?'<div class="sub">此品項已停止開發。</div>':'<div class="sub">由產品PM 或老闆調整各品項時程。</div>'}
      ${p.schedAt?`<div class="sub">最後調整：${esc(nm(p.schedBy))} · ${stamp(p.schedAt)}</div>`:''}
+     ${delBtn(p)}
    </div>`;
 }
 function renderProjDrawer(){
@@ -592,6 +596,7 @@ function renderProjDrawer(){
        <div class="row"><button class="btn primary" data-act="saveProj">儲存</button><button class="btn" data-act="resetDraft">放棄修改</button></div></div>`
      :p.dropped?'':'<div class="sub">由產品PM、老闆、專案建立者或主責人調整時程。</div>'}
      ${canEditProj(p)?`<div class="row"><button class="btn sm" data-act="dropProj">${p.dropped?'恢復此專案':'停止此專案'}</button></div>`:''}
+     ${delBtn(p)}
      <div class="blk"><h4>討論與紀錄</h4>
        <div class="notes">${notes.map(noteHtml).join('')||'<div class="empty">還沒有留言。</div>'}</div>
        ${a?`<div class="compose" style="margin-top:12px"><label for="noteIn" class="vh">內容</label><textarea id="noteIn" rows="3" placeholder="留言給同事，例如客戶回覆、規格變更…">${esc(S.drafts[p.id]||'')}</textarea><button class="btn primary sm" data-act="postProj" style="justify-self:end">送出留言</button></div>`:''}
@@ -764,6 +769,7 @@ document.addEventListener('click',e=>{
     case 'addStage':{const D=S.pDraft;if(!D)return;pullDraft();const ends=D.stages.map(x=>x.end).filter(Boolean).sort();const s0=ends.length?addDays(pd(ends[ends.length-1]),1):today();
       const k='x'+Date.now().toString(36);D.stages.push({k,n:'新階段',start:iso(s0),end:iso(addDays(s0,6)),v:''});renderDrawer();const el=$('#jn-'+k);if(el){el.focus();el.select();}break;}
     case 'resetDraft':S.pDraft=null;renderDrawer();toast('已放棄未儲存的修改');break;
+    case 'delProj':{if(b.dataset.confirm!=='1'){b.dataset.confirm='1';b.textContent='確定永久刪除？再按一次';return;}delProj(b.dataset.id);break;}
     case 'shiftProj':{const D=S.pDraft,p=S.products.find(x=>x.id===S.openProj);const n=Math.round(+$('#jShift').value||0);if(!D||!p||!n)return;pullDraft();
       D.stages.forEach(x=>{const real=p.stages.find(y=>y.k===x.k);if(real&&(real.v==='done'||real.v==='skip'))return;if(x.start)x.start=iso(addDays(pd(x.start),n));if(x.end)x.end=iso(addDays(pd(x.end),n));});
       D.fresh=true;renderDrawer();toast(`未完成階段已${n>0?'往後':'往前'}移 ${Math.abs(n)} 天，記得儲存`);break;}
@@ -822,6 +828,15 @@ function createProj(f){
   render();if(live())queue('p:'+id,()=>S.db.doc('products/'+id).set(doc));
   toast(`已建立${PTYPES[ty].l}：${name}`);
   if(ty==='internal')setTab('internal');else{if(f==='af')setTab(ty);openProj(id);}
+}
+// remove at once, put it back if the server refuses
+function delProj(id){
+  const i=S.products.findIndex(x=>x.id===id);const p=S.products[i];if(!p||!canDelProj(p))return;
+  S.products.splice(i,1);if($('#drawer').open)$('#drawer').close();render();
+  if(!live()){toast(`已刪除「${p.name}」`);return;}
+  queue('p:'+id,()=>S.db.doc('products/'+id).delete().then(()=>toast(`已刪除「${p.name}」`),e=>{
+    console.error(e);if(!S.products.some(x=>x.id===id))S.products.splice(Math.min(i,S.products.length),0,p);render();
+    toast(e&&e.code==='permission_denied'?'沒有刪除權限，專案已保留。請聯絡網站管理者。':'刪除失敗，請稍後再試。');}));
 }
 function saveProj(){
   const p=S.products.find(x=>x.id===S.openProj);const D=S.pDraft;if(!p||!D||D.id!==p.id||!canEditProj(p))return;
