@@ -1,7 +1,7 @@
 (function(){
 "use strict";
 /* ---------- constants ---------- */
-const STAGES={1:'年度方向定案',2:'內部年度新品會議',3:'設計交稿',4:'新品設計確認定稿',5:'打樣確認',6:'包裝設計',7:'商品最終確認',8:'新品上市'};
+const STAGES={1:'年度方向定案',2:'內部年度新品會議',3:'設計交稿',4:'新品設計確認定稿',5:'打樣確認',6:'包裝設計',7:'商品最終確認',8:'國內通路上架',9:'國際通路上架'};
 const DEPTS=['老闆','產品設計','視覺設計','營管-採購','營管-倉管','行銷','業務-電商','業務-國外','業務-顧問'];
 const LABELS=['產品PM'].concat(DEPTS);
 const WAIT_ON=LABELS.concat(['供應商','外部廠商']);
@@ -9,6 +9,9 @@ const DEF_SET={offsets:[7,3,0],overdueDaily:true,escalateDays:3,ccPM:true,decisi
 const OFFSET_CHOICES=[14,7,3,1,0];
 const CELL=['','active','done','issue','skip'];const CELL_L={'':'未開始',active:'進行中',done:'完成',issue:'有問題',skip:'不需要'};
 const ci=t=>t.map(x=>({t:x,done:false,by:null,at:null}));
+// launch is split: one month on domestic channels as a market test, then international channels
+const S8_TASK={id:'s8',order:11,stage:8,sub:'國內通路上架（市場測試 1 個月）',owners:['行銷','業務-電商','業務-顧問','營管-倉管'],start:'2027-08',end:'2027-08',checklist:ci(['上架資料與商品照','國內通路鋪貨','國內通路上架','蒐集銷售數據與通路回饋','市場測試檢討（決定國際上架調整）'])};
+const S9_TASK={id:'s9',order:12,stage:9,sub:'國際通路上架',owners:['業務-國外','行銷','營管-倉管'],start:'2027-09',end:'2027-09',checklist:ci(['依市場測試結果調整','國際上架資料與商品照','國際通路鋪貨','國際通路上架'])};
 const TEMPLATE=[
  {id:'s1',order:1,stage:1,sub:'年度主題、商品類型、售價價格帶；其他計畫：新色、特殊專案',owners:['產品PM','老闆'],start:'2026-06',end:'2026-08',checklist:ci(['確認年度主題','確認商品類型','訂定售價價格帶','規劃新色計畫','規劃特殊專案'])},
  {id:'s2',order:2,stage:2,sub:'新品定案、時程確認',owners:['全公司'],start:'2026-09',end:'2026-10',checklist:ci(['準備新品提案資料','召開內部年度新品會議','新品定案名單','確認全年時程'])},
@@ -19,8 +22,8 @@ const TEMPLATE=[
  {id:'s5b',order:7,stage:5,sub:'二次打樣（含測試及調整）',owners:['營管-採購','產品設計','產品PM'],start:'2027-04',end:'2027-04',checklist:ci(['收到二次打樣','功能與品質測試','確認可量產'])},
  {id:'s6',order:8,stage:6,sub:'包裝設計（含需求確認：條碼、外包裝所需資訊）',owners:['產品PM','視覺設計'],start:'2027-03',end:'2027-04',checklist:ci(['確認包裝需求','申請條碼','彙整外包裝資訊','包裝設計稿','包裝打樣確認'])},
  {id:'s7a',order:9,stage:7,sub:'成品及包裝最終確認',owners:['產品設計','產品PM','老闆'],start:'2027-05',end:'2027-05',checklist:ci(['成品確認','包裝確認','老闆最終核准'])},
- {id:'s7b',order:10,stage:7,sub:'大貨下單（含包裝）',owners:['營管-採購'],start:'2027-06',end:'2027-08',checklist:ci(['大貨下單','包裝下單','生產進度追蹤','到貨驗收'])},
- {id:'s8',order:11,stage:8,sub:'新品上市',owners:['行銷','業務-電商','營管-倉管','業務-國外','業務-顧問'],start:'2027-09',end:'2027-09',checklist:ci(['上架資料與商品照','通路鋪貨','新品上市'])}
+ {id:'s7b',order:10,stage:7,sub:'大貨下單（含包裝）',owners:['營管-採購'],start:'2027-06',end:'2027-07',checklist:ci(['大貨下單','包裝下單','生產進度追蹤','到貨驗收'])},
+ S8_TASK,S9_TASK
 ];
 /* project types: internal runs on the annual stage plan; the others carry their own dated stages.
    project has several kinds, each with its own suggested stages; every stage list can be trimmed or extended per project */
@@ -43,7 +46,7 @@ const PTYPES={
 const TYPE_KEYS=['internal','project','external','gift'];
 const DATED_TABS=['project','external','gift'];
 const TAB_KEYS=['all','internal'].concat(DATED_TABS);
-const LAUNCH=new Date(2027,8,1);
+const LAUNCH=new Date(2027,7,1); // domestic channel launch; international follows a month later
 const BASE_Y=2026,BASE_M=6,NM=16;
 
 /* ---------- state ---------- */
@@ -262,7 +265,7 @@ function renderHero(){
   const over=ts.filter(t=>status(t).over).length,blk=ts.filter(t=>t.blocked&&!t.locked).length,rv=ts.filter(t=>t.review).length;
   const left=cur?days(td,tEnd(cur)):0;
   $('#stats').innerHTML=`
-   <div class="stat hot"><div class="k">距離新品上市</div><div class="v num">${days(td,LAUNCH)}<small>天</small></div><div class="s">2027/9 上市</div></div>
+   <div class="stat hot"><div class="k">距離國內通路上架</div><div class="v num">${days(td,LAUNCH)}<small>天</small></div><div class="s">2027/8 國內上架 · 9 月國際上架</div></div>
    <div class="stat"><div class="k">本階段剩餘</div><div class="v num">${cur?Math.max(left,0):'—'}<small>天</small></div><div class="s">${cur?esc(cur.sub)+' · 截止 '+md(tEnd(cur)):'—'}</div></div>
    <div class="stat"><div class="k">整體完成</div><div class="v num">${overall}<small>%</small></div><div class="bar" style="margin-top:8px"><i style="width:${overall}%"></i></div></div>
    <div class="stat"><div class="k">需要處理</div><div class="v num" style="color:${over?'var(--danger)':'inherit'}">${over}<small>逾期</small></div><div class="s">${blk} 項卡住 · ${rv} 項待決策</div></div>`;
@@ -955,6 +958,21 @@ async function importTemplate(btn){
   try{for(const t of TEMPLATE){const d=clone(t);delete d.id;Object.assign(d,{baseStart:t.start,baseEnd:t.end,baseDue:t.due||null,review:false,locked:false,changeRequest:null,blocked:null,lead:null});await S.db.doc('tasks/'+t.id).set(d);}toast('已匯入年度範本');}
   catch(e){btn.disabled=false;err(e);}
 }
+/* one-time upgrade of a live plan made before the launch was split into domestic (8) and international (9) channels */
+let splitTried=false;
+async function migrateLaunchSplit(){
+  if(splitTried||!live()||!canAct())return;
+  const s8=S.tasks.find(t=>t.id==='s8');if(!s8||S.tasks.some(t=>t.id==='s9'))return;
+  splitTried=true;
+  try{
+    const s7b=S.tasks.find(t=>t.id==='s7b');
+    if(s7b&&!s7b.locked&&s7b.end==='2027-08'){const p={end:'2027-07'};if(s7b.baseEnd==='2027-08')p.baseEnd='2027-07';await S.db.doc('tasks/s7b').update(p);}
+    if(!s8.locked){const d=clone(S8_TASK);delete d.id;Object.assign(d,{baseStart:d.start,baseEnd:d.end,baseDue:null});await S.db.doc('tasks/s8').update(d);}
+    const d9=clone(S9_TASK);delete d9.id;Object.assign(d9,{baseStart:d9.start,baseEnd:d9.end,baseDue:null,review:false,locked:false,changeRequest:null,blocked:null,lead:s8.lead||null});
+    await S.db.doc('tasks/s9').set(d9);
+    addNote('s8','system','新品上市拆成兩個節點：2027/8 國內通路上架（市場測試 1 個月），2027/9 國際通路上架。大貨下單改為 2027/6–7。');
+  }catch(e){console.error(e);}
+}
 
 /* ---------- scroll progress + section nav ---------- */
 const bar=$('#prog');const links=[...document.querySelectorAll('.nav a')];const secs=links.map(a=>document.querySelector(a.getAttribute('href')));
@@ -987,12 +1005,12 @@ if(S.tab==='internal'&&location.hash&&location.hash!=='#overview')requestAnimati
   S.db=db;S.user=user;S.assets=assets;
   if(user){try{S.me=await user.id();}catch(e){}try{S.isOwner=await user.isOwner();}catch(e){}try{S.isAdmin=await user.canEdit();}catch(e){}try{S.canWrite=await user.can('data.write');}catch(e){}}
   const doc=d=>({id:d.id,...clone(d.data())});
-  db.collection('tasks').onSnapshot(s=>{S.tasks=s.docs.map(d=>{const x=doc(d);x.checklist=x.checklist||[];x.owners=x.owners||[];return x;});S.mode='live';render();resolveNames();},e=>console.error(e));
+  db.collection('tasks').onSnapshot(s=>{S.tasks=s.docs.map(d=>{const x=doc(d);x.checklist=x.checklist||[];x.owners=x.owners||[];return x;});S.mode='live';render();resolveNames();migrateLaunchSplit();},e=>console.error(e));
   db.collection('notes').onSnapshot(s=>{S.notes=s.docs.map(doc);if(live())render();resolveNames();},e=>console.error(e));
   db.collection('files').onSnapshot(s=>{S.files=s.docs.map(doc);if(live())render();resolveNames();},e=>console.error(e));
   db.collection('products').onSnapshot(s=>{S.products=s.docs.map(doc);if(live())render();},e=>console.error(e));
   db.collection('people').onSnapshot(s=>{const m={};s.docs.forEach(d=>m[d.id]=clone(d.data()));S.people=m;if(live())render();},e=>console.error(e));
-  db.collection('claims').onSnapshot(s=>{const m={};s.docs.forEach(d=>{const x=d.data();if(x&&x.personId)m[d.id]=x.personId;});S.claims=m;if(live())render();resolveNames();},e=>console.error(e));
+  db.collection('claims').onSnapshot(s=>{const m={};s.docs.forEach(d=>{const x=d.data();if(x&&x.personId)m[d.id]=x.personId;});S.claims=m;if(live())render();resolveNames();migrateLaunchSplit();},e=>console.error(e));
   db.collection('reminderLog').onSnapshot(s=>{S.logs=s.docs.map(doc);if(live())render();},e=>console.error(e));
   db.doc('settings/reminders').onSnapshot(s=>{S.settings=s.exists?clone(s.data()):null;if(live())render();},e=>console.error(e));
 })();
